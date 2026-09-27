@@ -67,6 +67,23 @@ export type EvaluationSummary = {
   late_classification_accuracy: number | null;
 };
 
+export type ModelMetrics = {
+  candidate: {
+    date_mae_days: number;
+    mean_brier_error: number;
+    late_classification_accuracy: number;
+  };
+  baseline: {
+    date_mae_days: number;
+    mean_brier_error: number;
+    late_classification_accuracy: number;
+  };
+  delta: {
+    date_mae_days: number;
+    mean_brier_error: number;
+  };
+};
+
 export type ModelStatus = {
   business_id: string;
   active: boolean;
@@ -74,22 +91,7 @@ export type ModelStatus = {
   trained_at?: string;
   train_count?: number;
   test_count?: number;
-  metrics?: {
-    candidate: {
-      date_mae_days: number;
-      mean_brier_error: number;
-      late_classification_accuracy: number;
-    };
-    baseline: {
-      date_mae_days: number;
-      mean_brier_error: number;
-      late_classification_accuracy: number;
-    };
-    delta: {
-      date_mae_days: number;
-      mean_brier_error: number;
-    };
-  };
+  metrics?: ModelMetrics;
 };
 
 export type BacktestResult = {
@@ -148,8 +150,8 @@ export const api = {
       train_count: number;
       test_count: number;
       model_version: string;
-      candidate_metrics: ModelStatus["metrics"]["candidate"];
-      baseline_metrics: ModelStatus["metrics"]["baseline"];
+      candidate_metrics: ModelMetrics["candidate"];
+      baseline_metrics: ModelMetrics["baseline"];
       delta: {
         date_mae_days: number;
         mean_brier_error: number;
