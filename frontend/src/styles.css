@@ -1,0 +1,24 @@
+:root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#e8edf7;background:#060912;font-synthesis:none}
+*{box-sizing:border-box}
+body{margin:0;min-width:320px;background:radial-gradient(circle at top left,rgba(47,89,160,.18),transparent 34%),#060912}
+button,input{font:inherit}
+button{border:1px solid #263148;background:#101827;color:#e8edf7;border-radius:10px;padding:10px 14px;cursor:pointer}
+button:hover{border-color:#4b618e}button:disabled{opacity:.6;cursor:not-allowed}
+.app-shell{max-width:1500px;margin:0 auto;padding:32px}
+.topbar{display:flex;justify-content:space-between;gap:24px;align-items:end;padding:12px 0 28px}
+h1{margin:6px 0 0;font-size:clamp(28px,4vw,48px);line-height:1.05;max-width:840px}h2{margin:0;font-size:20px}h3{margin:8px 0 2px;font-size:22px}
+.eyebrow{margin:0;text-transform:uppercase;letter-spacing:.12em;font-size:11px;font-weight:800;color:#7f8ba6}
+.toolbar{display:flex;gap:12px;align-items:end}.toolbar label{display:grid;gap:6px;color:#7f8ba6;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em}.toolbar input{width:180px;padding:11px 12px;background:#0b1120;color:#eef3fb;border:1px solid #202b40;border-radius:10px;outline:none}.toolbar input:focus{border-color:#5a78b2}
+.error-banner{padding:12px 14px;border:1px solid #633447;background:rgba(125,32,64,.18);color:#ffc6d4;border-radius:12px;margin-bottom:16px}
+.metric-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px}.metric-card,.panel{background:rgba(10,16,29,.86);border:1px solid #192237;border-radius:16px;box-shadow:0 14px 45px rgba(0,0,0,.18)}.metric-card{padding:20px;display:grid;gap:8px}.metric-card span{color:#7f8ba6;font-size:13px}.metric-card strong{font-size:27px}.metric-card.danger{border-color:rgba(155,69,97,.55)}
+.main-grid,.bottom-grid{display:grid;grid-template-columns:1.3fr 1fr;gap:14px;margin-bottom:14px}.panel{padding:20px}.panel-header{display:flex;justify-content:space-between;gap:20px;align-items:center;margin-bottom:16px}
+.pill{font-size:11px;color:#aebbd0;padding:7px 10px;border:1px solid #23304a;border-radius:999px;background:#0c1321}
+.invoice-list,.buyer-list{display:grid}.invoice-row,.buyer-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 0;border-top:1px solid #151e30}.invoice-row:first-child,.buyer-row:first-child{border-top:0}
+.row-main,.row-right{display:flex;align-items:center;gap:11px}.row-main>div,.buyer-row>div:first-child{display:grid;gap:4px}.row-main span,.buyer-row span{color:#78849d;font-size:12px}.row-right{justify-content:end;display:grid;gap:5px;text-align:right}
+.risk-label{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}.risk-label.danger{color:#ff8da8}.risk-label.warning{color:#ffc98b}.risk-label.healthy{color:#8fe2ba}
+.risk-dot{width:9px;height:9px;border-radius:50%;display:inline-block}.risk-dot.danger{background:#e15b79;box-shadow:0 0 14px rgba(225,91,121,.35)}.risk-dot.warning{background:#e1ad5b;box-shadow:0 0 14px rgba(225,173,91,.26)}.risk-dot.healthy{background:#58c996;box-shadow:0 0 14px rgba(88,201,150,.25)}
+.score-large{font-size:32px;font-weight:850}.score-large small{font-size:12px;color:#6e7890}.buyer-score{min-width:60px;display:grid;justify-items:end;gap:1px}.buyer-score strong{font-size:24px}.buyer-score span{font-weight:800;color:#8ea1bf}
+.health-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px}.stat{padding:14px;border:1px solid #19243a;border-radius:12px;background:#0a1120}.stat span{display:block;color:#72809b;font-size:11px;text-transform:uppercase;letter-spacing:.08em}.stat strong{display:block;margin-top:8px;font-size:22px}
+.muted{color:#697691;font-size:12px;line-height:1.5}.action-card{padding:18px;border:1px solid #1e2d48;border-radius:14px;background:linear-gradient(145deg,#0d1728,#0a101c)}.action-score{color:#ffafbe;font-weight:800;display:flex;align-items:center;gap:8px}.action-card>p{margin:2px 0 12px;color:#8b98af}.action-card>strong{display:block;font-size:24px}.empty{padding:28px 8px;text-align:center;color:#6e7a92;border:1px dashed #1d2a41;border-radius:12px}
+@media(max-width:980px){.metric-grid{grid-template-columns:repeat(2,1fr)}.main-grid,.bottom-grid{grid-template-columns:1fr}.topbar{align-items:start;flex-direction:column}}
+@media(max-width:600px){.app-shell{padding:18px}.metric-grid{grid-template-columns:1fr}.toolbar{width:100%}.toolbar label{flex:1}.toolbar input{width:100%}.invoice-row,.buyer-row{align-items:start}.row-right{min-width:90px}.health-grid{grid-template-columns:1fr}}
