@@ -6,6 +6,7 @@ import type {
   Dashboard,
   EvaluationSummary,
   InvoiceRisk,
+  ModelDrift,
   ModelStatus,
 } from "./api";
 import { analyzeAll, api, uploadInvoices, uploadPayments } from "./api";
@@ -38,6 +39,7 @@ export default function App() {
   const [evaluation, setEvaluation] = useState<EvaluationSummary | null>(null);
   const [backtest, setBacktest] = useState<BacktestResult | null>(null);
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
+  const [modelDrift, setModelDrift] = useState<ModelDrift | null>(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -55,12 +57,14 @@ export default function App() {
         api.invoices(businessId),
         api.evaluations(businessId),
         api.modelStatus(businessId),
+        api.latestModelDrift(businessId),
       ]);
       setDashboard(results[0]);
       setCustomers(results[1]);
       setInvoices(results[2]);
       setEvaluation(results[3]);
       setModelStatus(results[4]);
+      setModelDrift(results[5]);
     } catch {
       setError("Unable to load the API. Start FastAPI and check the business ID.");
     } finally {
@@ -116,6 +120,38 @@ export default function App() {
       setError("Portfolio analysis failed. Import invoice and payment data first.");
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function runRetrainCheck() {
+    setBacktesting(true);
+    setError("");
+    setUploadMessage("");
+    try {
+      const result = await api.retrainIfNeeded(businessId);
+      setModelDrift(result.drift);
+      await load();
+      if (result.retrained) {
+        setUploadMessage(
+          result.training
+            ? "Drift triggered retraining. " +
+              result.training.model_version +
+              " is now " +
+              result.training.promotion_status +
+              "."
+            : "Drift triggered retraining.",
+        );
+      } else if (result.reason === "no_active_model") {
+        setUploadMessage("No active ML model exists yet. Train the first candidate.");
+      } else {
+        setUploadMessage(
+          "No retraining triggered. Recent behavior is within the configured drift threshold.",
+        );
+      }
+    } catch {
+      setError("Drift check failed. Make sure the business has an active model and enough historical invoices.");
+    } finally {
+      setBacktesting(false);
     }
   }
 
@@ -414,6 +450,9 @@ export default function App() {
                     Roll back
                   </button>
                 )}
+                <button onClick={() => void runRetrainCheck()} disabled={backtesting || loading}>
+                  {backtesting ? "Checking…" : "Check drift & retrain"}
+                </button>
                 <button onClick={() => void runBacktest()} disabled={backtesting || loading}>
                   {backtesting ? "Working…" : "Run historical backtest"}
                 </button>
@@ -459,6 +498,39 @@ export default function App() {
                 <div>
                   <strong>Baseline</strong>
                   <span> Brier {modelStatus.metrics.baseline.mean_brier_error.toFixed(4)} · Date MAE {modelStatus.metrics.baseline.date_mae_days.toFixed(1)}d</span>
+                </div>
+              </div>
+            )}
+            {modelDrift && (
+              <div className="drift-summary">
+                <div className="drift-head">
+                  <div>
+                    <strong>Behavior drift</strong>
+                    <span>
+                      {modelDrift.sample_count} recent eligible invoices ·{" "}
+                      {modelDrift.model_version}
+                    </span>
+                  </div>
+                  <span className={"drift-state " + modelDrift.status}>
+                    {modelDrift.recommendation === "retrain"
+                      ? "Retrain recommended"
+                      : modelDrift.status === "insufficient_data"
+                        ? "Need more data"
+                        : modelDrift.status === "no_active_model"
+                          ? "Initial training"
+                          : "Stable"}
+                  </span>
+                </div>
+                <div className="drift-metrics">
+                  <span>
+                    Drift score <strong>{modelDrift.drift_score == null ? "—" : modelDrift.drift_score.toFixed(2)}</strong>
+                  </span>
+                  <span>
+                    Max feature shift <strong>{modelDrift.max_feature_shift == null ? "—" : modelDrift.max_feature_shift.toFixed(2)}σ</strong>
+                  </span>
+                  <span>
+                    Action <strong>{modelDrift.recommendation.replaceAll("_", " ")}</strong>
+                  </span>
                 </div>
               </div>
             )}
