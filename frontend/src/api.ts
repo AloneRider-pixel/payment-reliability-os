@@ -104,6 +104,16 @@ export type ModelStatus = {
   }>;
 };
 
+export type ScheduledJobRun = {
+  job_run_id: number;
+  job_type: string;
+  scheduled_for: string;
+  started_at: string;
+  finished_at: string | null;
+  status: "running" | "completed" | "failed";
+  result: Record<string, unknown>;
+};
+
 export type CollectionAction = {
   action_id: number;
   invoice_id: number;
@@ -201,6 +211,10 @@ async function getJson<T>(path: string): Promise<T> {
 }
 
 export const api = {
+  scheduledRuns: (businessId: string) =>
+    getJson<ScheduledJobRun[]>(
+      "/jobs/runs?business_id=" + encodeURIComponent(businessId),
+    ),
   actions: (businessId: string) =>
     getJson<CollectionAction[]>(
       "/actions?business_id=" + encodeURIComponent(businessId),
