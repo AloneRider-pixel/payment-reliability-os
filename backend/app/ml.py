@@ -1,5 +1,5 @@
 import json
-from datetime import date, datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from math import exp, isfinite
 from pathlib import Path
@@ -173,26 +173,6 @@ def _collect_samples(
         )
 
     return samples, skipped_cold_start
-
-
-def _metrics(predictions: list[float], delays: list[float], actual_late: list[bool]) -> dict:
-    brier = sum(
-        (prediction - float(actual)) ** 2
-        for prediction, actual in zip(predictions, actual_late)
-    ) / len(predictions)
-    date_mae = sum(
-        abs(delay - predicted_delay)
-        for delay, predicted_delay in zip(delays, predictions["predicted_delays"])
-    ) / len(delays)
-    correct = sum(
-        (prediction >= 0.5) == actual
-        for prediction, actual in zip(predictions, actual_late)
-    )
-    return {
-        "date_mae_days": round(date_mae, 2),
-        "mean_brier_error": round(brier, 6),
-        "late_classification_accuracy": round(correct / len(predictions), 4),
-    }
 
 
 def _binary_metrics(
@@ -432,10 +412,6 @@ def predict_invoice_risk_with_active_model(
     if not invoice:
         raise ValueError("invoice not found")
 
-    history = _history_before_invoice(
-        [invoice],
-        invoice,
-    )
     # For live inference, use the complete settled buyer history available
     # at prediction time instead of the historical backtest cutoff.
     from backend.app.repository import buyer_history
@@ -477,9 +453,7 @@ def predict_invoice_risk_with_active_model(
         ),
     )
     expected_delay = round(predicted_delay, 1)
-    expected_date = invoice.due_date + __import__("datetime").timedelta(
-        days=round(expected_delay)
-    )
+    expected_date = invoice.due_date + timedelta(days=round(expected_delay))
     cash_at_risk = round(float(invoice.amount) * late_probability, 2)
 
     reasons = list(baseline["reasons"])
