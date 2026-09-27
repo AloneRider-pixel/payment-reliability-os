@@ -119,6 +119,32 @@ export default function App() {
     }
   }
 
+  async function rollbackModel() {
+    if (!modelStatus?.active) return;
+    setBacktesting(true);
+    setError("");
+    setUploadMessage("");
+    try {
+      const previous = modelStatus.history?.find((item) => item.status === "superseded");
+      const result = await api.rollbackModel(
+        businessId,
+        previous?.model_version,
+      );
+      setUploadMessage(
+        "Rolled back " +
+          result.rolled_back_from +
+          " → " +
+          result.active_model_version +
+          ".",
+      );
+      await load();
+    } catch {
+      setError("Rollback failed. No prior promoted ML model may be available.");
+    } finally {
+      setBacktesting(false);
+    }
+  }
+
   async function runModelTraining() {
     setBacktesting(true);
     setError("");
@@ -383,6 +409,11 @@ export default function App() {
                 <button onClick={() => void runModelTraining()} disabled={backtesting || loading}>
                   {backtesting ? "Training…" : "Train ML candidate"}
                 </button>
+                {modelStatus?.active && (
+                  <button onClick={() => void rollbackModel()} disabled={backtesting || loading}>
+                    Roll back
+                  </button>
+                )}
                 <button onClick={() => void runBacktest()} disabled={backtesting || loading}>
                   {backtesting ? "Working…" : "Run historical backtest"}
                 </button>
