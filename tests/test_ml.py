@@ -319,7 +319,7 @@ def test_model_drift_monitoring_persists_snapshot():
                 session.add(
                     Payment(
                         invoice_id=invoice.id,
-                        payment_date=due_date,
+                        payment_date=due_date + timedelta(days=15),
                         amount=Decimal("100000.00"),
                     )
                 )
