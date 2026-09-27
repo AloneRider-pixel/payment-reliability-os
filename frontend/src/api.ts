@@ -56,3 +56,30 @@ export const api = {
   invoices: (businessId: string) => getJson<InvoiceRisk[]>("/risk/invoices?business_id=" + encodeURIComponent(businessId)),
   evaluations: (businessId: string) => getJson<EvaluationSummary>("/evaluations/summary?business_id=" + encodeURIComponent(businessId)),
 };
+
+async function uploadFile(path: string, businessId: string, file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await fetch(API_BASE + path + "?business_id=" + encodeURIComponent(businessId), {
+    method: "POST",
+    body: form,
+  });
+  if (!response.ok) {
+    throw new Error("Upload API " + response.status);
+  }
+  return response.json();
+}
+
+export async function uploadInvoices(businessId: string, file: File) {
+  return uploadFile("/imports/invoices", businessId, file);
+}
+
+export async function uploadPayments(businessId: string, file: File) {
+  return uploadFile("/imports/payments", businessId, file);
+}
+
+export async function analyzeAll(businessId: string) {
+  return getJson<{ predictions_created: number; invoices_seen: number }>(
+    "/risk/analyze-all?business_id=" + encodeURIComponent(businessId),
+  );
+}
