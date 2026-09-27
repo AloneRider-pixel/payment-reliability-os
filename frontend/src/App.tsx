@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ChangeEvent } from "react";
-import type { CustomerRisk, Dashboard, EvaluationSummary, InvoiceRisk } from "./api";
+import type {
+  BacktestResult,
+  CustomerRisk,
+  Dashboard,
+  EvaluationSummary,
+  InvoiceRisk,
+} from "./api";
 import { analyzeAll, api, uploadInvoices, uploadPayments } from "./api";
 
 const DEFAULT_BUSINESS = "demo";
@@ -29,11 +35,13 @@ export default function App() {
   const [customers, setCustomers] = useState<CustomerRisk[]>([]);
   const [invoices, setInvoices] = useState<InvoiceRisk[]>([]);
   const [evaluation, setEvaluation] = useState<EvaluationSummary | null>(null);
+  const [backtest, setBacktest] = useState<BacktestResult | null>(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadMessage, setUploadMessage] = useState("");
+  const [backtesting, setBacktesting] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -107,8 +115,30 @@ export default function App() {
     }
   }
 
+  async function runBacktest() {
+    setBacktesting(true);
+    setError("");
+    setUploadMessage("");
+    try {
+      const result = await api.backtest(businessId, 3);
+      setBacktest(result);
+      setUploadMessage(
+        "Backtested " +
+          result.backtested_invoices +
+          " settled invoices using a minimum history of " +
+          result.min_history +
+          ".",
+      );
+    } catch {
+      setError("Historical backtest failed. Import enough settled invoice history first.");
+    } finally {
+      setBacktesting(false);
+    }
+  }
+
   useEffect(() => {
     void load();
+    setBacktest(null);
   }, [businessId]);
 
   const averageScore = useMemo(() => {
@@ -315,9 +345,14 @@ export default function App() {
                 <p className="eyebrow">Model health</p>
                 <h2>Prediction accuracy</h2>
               </div>
-              <span className="pill">
-                {evaluation?.evaluated_predictions ?? 0} evaluated
-              </span>
+              <div className="panel-actions">
+                <span className="pill">
+                  {evaluation?.evaluated_predictions ?? 0} evaluated
+                </span>
+                <button onClick={() => void runBacktest()} disabled={backtesting || loading}>
+                  {backtesting ? "Backtesting…" : "Run historical backtest"}
+                </button>
+              </div>
             </div>
             <div className="health-grid">
               <Stat
@@ -346,9 +381,29 @@ export default function App() {
               />
             </div>
             <p className="muted">
-              Validation metrics are shown only for settled invoices with
-              stored predictions.
+              Stored metrics use evaluated predictions. Historical backtests
+              score each settled invoice using only behavior available before
+              that invoice was issued.
             </p>
+            {backtest && (
+              <div className="backtest-summary">
+                <div className="backtest-head">
+                  <strong>Historical backtest</strong>
+                  <span>{backtest.backtested_invoices} eligible invoices · {backtest.model_version}</span>
+                </div>
+                <div className="backtest-metrics">
+                  <span>
+                    Observed late rate <strong>{pct(backtest.observed_late_rate ?? 0)}</strong>
+                  </span>
+                  <span>
+                    Predicted late rate <strong>{pct(backtest.mean_predicted_late_rate ?? 0)}</strong>
+                  </span>
+                  <span>
+                    Calibration gap <strong>{pct(backtest.mean_absolute_calibration_gap ?? 0)}</strong>
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="panel">
