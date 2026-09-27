@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 import json
 
@@ -9,16 +9,43 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.db import SessionLocal, init_db
-from backend.app.entities import Business, Customer, Invoice, PredictionEvaluation, RiskPrediction
+from backend.app.evaluator import evaluate_prediction, evaluation_summary
+from backend.app.entities import (
+    Business,
+    Customer,
+    Invoice,
+    PredictionEvaluation,
+    RiskPrediction,
+)
 from backend.app.import_service import import_invoices, import_payments
 from backend.app.models import BuyerHistory, InvoiceInput
 from backend.app.repository import buyer_history, invoice_input
-from backend.app.evaluator import evaluate_prediction, evaluation_summary
-from backend.app.scoring import predict_invoice_risk, score_buyer
+from backend.app.scoring import MODEL_VERSION, predict_invoice_risk, score_buyer
 
 init_db()
 
-app = FastAPI(title="Payment Reliability OS", version="0.3.0", description="Explainable B2B payment-behavior intelligence.")
+app = FastAPI(
+    title="Payment Reliability OS",
+    version="0.4.0",
+    description="Explainable B2B payment-behavior intelligence.",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class ScoreFactorResponse(BaseModel):
+    name: str
+    value: float
+    weight: float
+    contribution: float
+    direction: str
+
 
 class BuyerScoreResponse(BaseModel):
     score: float
@@ -28,6 +55,10 @@ class BuyerScoreResponse(BaseModel):
     reasons: list[str]
     evidence_count: int
     confidence: str
+    model_version: str
+    features: dict[str, float | int]
+    factors: list[ScoreFactorResponse]
+
 
 class InvoiceRiskResponse(BaseModel):
     late_probability: float
@@ -35,10 +66,13 @@ class InvoiceRiskResponse(BaseModel):
     expected_payment_date: date
     cash_at_risk: float
     reasons: list[str]
+    model_version: str
+
 
 class BusinessCreate(BaseModel):
     id: str
     name: str
+
 
 def get_db():
     session = SessionLocal()
@@ -47,9 +81,15 @@ def get_db():
     finally:
         session.close()
 
+
+def _utc_now_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "version": app.version}
+
 
 @app.post("/businesses")
 def create_business(payload: BusinessCreate, db: Session = Depends(get_db)):
@@ -57,38 +97,70 @@ def create_business(payload: BusinessCreate, db: Session = Depends(get_db)):
     business_name = payload.name.strip()
     if not business_id or not business_name:
         raise HTTPException(status_code=422, detail="id and name are required")
+
     existing = db.get(Business, business_id)
     if existing:
         return {"id": existing.id, "name": existing.name, "created": False}
+
     business = Business(id=business_id, name=business_name)
     db.add(business)
     db.commit()
     return {"id": business.id, "name": business.name, "created": True}
 
+
 @app.post("/imports/invoices")
-async def upload_invoices(business_id: str = Query(min_length=1), file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_invoices(
+    business_id: str = Query(min_length=1),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
     if not file.filename or file.filename.lower().rsplit(".", 1)[-1] not in {"csv", "xlsx"}:
         raise HTTPException(status_code=415, detail="Upload a CSV or XLSX file")
     try:
-        result = import_invoices(db, business_id.strip(), await file.read(), file.filename)
-        return {"business_id": business_id, **result}
+        result = import_invoices(
+            db, business_id.strip(), await file.read(), file.filename
+        )
+        return {"business_id": business_id.strip(), **result}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
 
 @app.post("/imports/payments")
-async def upload_payments(business_id: str = Query(min_length=1), file: UploadFile = File(...), db: Session = Depends(get_db)):
-    if not file.filename or not file.filename.lower().endswith(".csv"):
-        raise HTTPException(status_code=415, detail="MVP ingestion currently accepts CSV files")
+async def upload_payments(
+    business_id: str = Query(min_length=1),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    if not file.filename or file.filename.lower().rsplit(".", 1)[-1] not in {"csv", "xlsx"}:
+        raise HTTPException(status_code=415, detail="Upload a CSV or XLSX file")
     try:
-        result = import_payments(db, business_id.strip(), await file.read(), file.filename)
-        return {"business_id": business_id, **result}
+        result = import_payments(
+            db, business_id.strip(), await file.read(), file.filename
+        )
+        return {"business_id": business_id.strip(), **result}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+
 @app.get("/customers")
-def list_customers(business_id: str = Query(min_length=1), db: Session = Depends(get_db)):
-    customers = db.scalars(select(Customer).where(Customer.business_id == business_id).order_by(Customer.name)).all()
-    return [{"id": c.id, "name": c.name, "external_key": c.external_key} for c in customers]
+def list_customers(
+    business_id: str = Query(min_length=1),
+    db: Session = Depends(get_db),
+):
+    customers = db.scalars(
+        select(Customer)
+        .where(Customer.business_id == business_id)
+        .order_by(Customer.name)
+    ).all()
+    return [
+        {
+            "id": customer.id,
+            "name": customer.name,
+            "external_key": customer.external_key,
+        }
+        for customer in customers
+    ]
+
 
 @app.get("/customers/{customer_id}/score", response_model=BuyerScoreResponse)
 def customer_score(customer_id: int, db: Session = Depends(get_db)):
@@ -98,13 +170,16 @@ def customer_score(customer_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return BuyerScoreResponse(**result)
 
+
 @app.post("/score/buyer", response_model=BuyerScoreResponse)
 def score_buyer_endpoint(history: BuyerHistory):
     return BuyerScoreResponse(**score_buyer(history))
 
+
 @app.post("/risk/invoice", response_model=InvoiceRiskResponse)
 def risk_invoice_endpoint(payload: InvoiceInput):
     return InvoiceRiskResponse(**predict_invoice_risk(payload))
+
 
 @app.post("/risk/analyze/{invoice_id}", response_model=InvoiceRiskResponse)
 def analyze_invoice(invoice_id: int, db: Session = Depends(get_db)):
@@ -112,27 +187,130 @@ def analyze_invoice(invoice_id: int, db: Session = Depends(get_db)):
         payload = invoice_input(db, invoice_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     result = predict_invoice_risk(payload)
-    prediction = RiskPrediction(invoice_id=invoice_id, predicted_at=datetime.now(timezone.utc), late_probability=result["late_probability"], expected_delay_days=result["expected_delay_days"], expected_payment_date=result["expected_payment_date"], cash_at_risk=Decimal(str(result["cash_at_risk"])), model_version="baseline-v0.1", reasons=json.dumps(result["reasons"]))
+    prediction = RiskPrediction(
+        invoice_id=invoice_id,
+        predicted_at=_utc_now_naive(),
+        late_probability=result["late_probability"],
+        expected_delay_days=result["expected_delay_days"],
+        expected_payment_date=result["expected_payment_date"],
+        cash_at_risk=Decimal(str(result["cash_at_risk"])),
+        model_version=MODEL_VERSION,
+        reasons=json.dumps(result["reasons"]),
+    )
     db.add(prediction)
     db.commit()
     return InvoiceRiskResponse(**result)
 
-@app.post("/risk/analyze-all"),def analyze_all(business_id: str = Query(min_length=1), db: Session = Depends(get_db)):,    from datetime import timedelta,    from sqlalchemy import desc,,    invoices = db.scalars(,        select(Invoice).where(Invoice.business_id == business_id).order_by(Invoice.id),    ).all(),    created = 0,    skipped_settled = 0,    skipped_recent = 0,,    now = datetime.now(timezone.utc).replace(tzinfo=None),    for invoice in invoices:,        paid = sum((p.amount for p in invoice.payments), Decimal("0")),        if paid >= invoice.amount:,            skipped_settled += 1,            continue,,        latest = db.scalar(,            select(RiskPrediction),            .where(RiskPrediction.invoice_id == invoice.id),            .order_by(desc(RiskPrediction.predicted_at)),        ),        if latest and latest.predicted_at >= now - timedelta(hours=24):,            skipped_recent += 1,            continue,,        payload = invoice_input(db, invoice.id),        result = predict_invoice_risk(payload),        db.add(RiskPrediction(,            invoice_id=invoice.id,,            predicted_at=now,,            late_probability=result["late_probability"],,            expected_delay_days=result["expected_delay_days"],,            expected_payment_date=result["expected_payment_date"],,            cash_at_risk=Decimal(str(result["cash_at_risk"])),,            model_version="baseline-v0.1",,            reasons=json.dumps(result["reasons"]),,        )),        created += 1,,    db.commit(),    return {,        "business_id": business_id,,        "invoices_seen": len(invoices),,        "predictions_created": created,,        "settled_skipped": skipped_settled,,        "recent_predictions_skipped": skipped_recent,,    },,@app.get("/predictions")
-def list_predictions(business_id: str = Query(min_length=1), limit: int = Query(default=50, ge=1, le=200), db: Session = Depends(get_db)):
-    rows = db.execute(select(RiskPrediction, Invoice, Customer).join(Invoice, RiskPrediction.invoice_id == Invoice.id).join(Customer, Invoice.customer_id == Customer.id).where(Invoice.business_id == business_id).order_by(RiskPrediction.predicted_at.desc()).limit(limit)).all()
-    return [{"invoice_id": invoice.id, "invoice_number": invoice.invoice_number, "customer_id": customer.id, "customer": customer.name, "predicted_at": prediction.predicted_at, "late_probability": float(prediction.late_probability), "expected_delay_days": float(prediction.expected_delay_days), "expected_payment_date": prediction.expected_payment_date, "cash_at_risk": float(prediction.cash_at_risk), "model_version": prediction.model_version, "reasons": json.loads(prediction.reasons)} for prediction, invoice, customer in rows]
+
+@app.post("/risk/analyze-all")
+def analyze_all(
+    business_id: str = Query(min_length=1),
+    db: Session = Depends(get_db),
+):
+    now = _utc_now_naive()
+    invoices = db.scalars(
+        select(Invoice)
+        .where(Invoice.business_id == business_id)
+        .order_by(Invoice.id)
+    ).all()
+
+    created = 0
+    skipped_settled = 0
+    skipped_recent = 0
+
+    for invoice in invoices:
+        paid = sum((payment.amount for payment in invoice.payments), Decimal("0"))
+        if paid >= invoice.amount:
+            skipped_settled += 1
+            continue
+
+        latest = db.scalar(
+            select(RiskPrediction)
+            .where(RiskPrediction.invoice_id == invoice.id)
+            .order_by(RiskPrediction.predicted_at.desc())
+        )
+        if latest and latest.predicted_at >= now - timedelta(hours=24):
+            skipped_recent += 1
+            continue
+
+        result = predict_invoice_risk(invoice_input(db, invoice.id))
+        db.add(
+            RiskPrediction(
+                invoice_id=invoice.id,
+                predicted_at=now,
+                late_probability=result["late_probability"],
+                expected_delay_days=result["expected_delay_days"],
+                expected_payment_date=result["expected_payment_date"],
+                cash_at_risk=Decimal(str(result["cash_at_risk"])),
+                model_version=MODEL_VERSION,
+                reasons=json.dumps(result["reasons"]),
+            )
+        )
+        created += 1
+
+    db.commit()
+    return {
+        "business_id": business_id,
+        "invoices_seen": len(invoices),
+        "predictions_created": created,
+        "settled_skipped": skipped_settled,
+        "recent_predictions_skipped": skipped_recent,
+    }
+
+
+@app.get("/predictions")
+def list_predictions(
+    business_id: str = Query(min_length=1),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    rows = db.execute(
+        select(RiskPrediction, Invoice, Customer)
+        .join(Invoice, RiskPrediction.invoice_id == Invoice.id)
+        .join(Customer, Invoice.customer_id == Customer.id)
+        .where(Invoice.business_id == business_id)
+        .order_by(RiskPrediction.predicted_at.desc())
+        .limit(limit)
+    ).all()
+
+    return [
+        {
+            "invoice_id": invoice.id,
+            "invoice_number": invoice.invoice_number,
+            "customer_id": customer.id,
+            "customer": customer.name,
+            "predicted_at": prediction.predicted_at,
+            "late_probability": float(prediction.late_probability),
+            "expected_delay_days": float(prediction.expected_delay_days),
+            "expected_payment_date": prediction.expected_payment_date,
+            "cash_at_risk": float(prediction.cash_at_risk),
+            "model_version": prediction.model_version,
+            "reasons": json.loads(prediction.reasons),
+        }
+        for prediction, invoice, customer in rows
+    ]
+
 
 @app.post("/predictions/{prediction_id}/evaluate")
-def evaluate_prediction_endpoint(prediction_id: int, db: Session = Depends(get_db)):
+def evaluate_prediction_endpoint(
+    prediction_id: int,
+    db: Session = Depends(get_db),
+):
     try:
         return evaluate_prediction(db, prediction_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+
 @app.get("/evaluations/summary")
-def evaluation_summary_endpoint(business_id: str = Query(min_length=1), db: Session = Depends(get_db)):
+def evaluation_summary_endpoint(
+    business_id: str = Query(min_length=1),
+    db: Session = Depends(get_db),
+):
     return evaluation_summary(db, business_id)
+
 
 @app.get("/evaluations")
 def list_evaluations(
@@ -142,13 +320,17 @@ def list_evaluations(
 ):
     rows = db.execute(
         select(RiskPrediction, PredictionEvaluation, Invoice, Customer)
-        .join(PredictionEvaluation, PredictionEvaluation.prediction_id == RiskPrediction.id)
+        .join(
+            PredictionEvaluation,
+            PredictionEvaluation.prediction_id == RiskPrediction.id,
+        )
         .join(Invoice, RiskPrediction.invoice_id == Invoice.id)
         .join(Customer, Invoice.customer_id == Customer.id)
         .where(Invoice.business_id == business_id)
         .order_by(PredictionEvaluation.evaluated_at.desc())
         .limit(limit)
     ).all()
+
     return [
         {
             "prediction_id": prediction.id,
@@ -166,6 +348,7 @@ def list_evaluations(
         for prediction, evaluation, invoice, customer in rows
     ]
 
+
 @app.get("/risk/invoices")
 def risk_invoices(
     business_id: str = Query(min_length=1),
@@ -181,17 +364,24 @@ def risk_invoices(
         .order_by(RiskPrediction.predicted_at.desc())
         .limit(limit * 5)
     ).all()
+
     latest = {}
     for prediction, invoice, customer in rows:
-        if prediction.late_probability >= threshold:
-            previous = latest.get(invoice.id)
-            if previous is None or prediction.predicted_at > previous[0].predicted_at:
-                latest[invoice.id] = (prediction, invoice, customer)
-    latest = dict(sorted(
-        latest.items(),
-        key=lambda item: (float(item[1][0].late_probability), float(item[1][0].late_probability)),
+        if float(prediction.late_probability) < threshold:
+            continue
+        previous = latest.get(invoice.id)
+        if previous is None or prediction.predicted_at > previous[0].predicted_at:
+            latest[invoice.id] = (prediction, invoice, customer)
+
+    selected = sorted(
+        latest.values(),
+        key=lambda row: (
+            float(row[0].late_probability),
+            float(row[0].cash_at_risk),
+        ),
         reverse=True,
-    )[:limit])
+    )[:limit]
+
     return [
         {
             "invoice_id": invoice.id,
@@ -203,11 +393,18 @@ def risk_invoices(
             "expected_delay_days": float(prediction.expected_delay_days),
             "expected_payment_date": prediction.expected_payment_date,
             "cash_at_risk": float(prediction.cash_at_risk),
-            "risk_band": "HIGH" if float(prediction.late_probability) >= 0.70 else "MEDIUM" if float(prediction.late_probability) >= 0.40 else "LOW",
+            "risk_band": (
+                "HIGH"
+                if float(prediction.late_probability) >= 0.70
+                else "MEDIUM"
+                if float(prediction.late_probability) >= 0.40
+                else "LOW"
+            ),
             "reasons": json.loads(prediction.reasons),
         }
-        for prediction, invoice, customer in latest.values()
+        for prediction, invoice, customer in selected
     ]
+
 
 @app.get("/risk/customers")
 def risk_customers(
@@ -219,28 +416,60 @@ def risk_customers(
         .where(Customer.business_id == business_id)
         .order_by(Customer.name)
     ).all()
+
     result = []
     for customer in customers:
         history = buyer_history(db, customer.id)
-        scored = score_buyer(history)
-        result.append({
-            "customer_id": customer.id,
-            "customer": customer.name,
-            **scored,
-            "outstanding_amount": history.current_outstanding_amount,
-        })
+        result.append(
+            {
+                "customer_id": customer.id,
+                "customer": customer.name,
+                **score_buyer(history),
+                "outstanding_amount": history.current_outstanding_amount,
+            }
+        )
+
     return sorted(result, key=lambda item: item["score"])
 
+
 @app.get("/dashboard")
-def dashboard(business_id: str = Query(min_length=1), db: Session = Depends(get_db)):
-    invoices = db.scalars(select(Invoice).where(Invoice.business_id == business_id)).all()
+def dashboard(
+    business_id: str = Query(min_length=1),
+    db: Session = Depends(get_db),
+):
+    invoices = db.scalars(
+        select(Invoice).where(Invoice.business_id == business_id)
+    ).all()
+
     outstanding = Decimal("0")
     for invoice in invoices:
-        paid = sum((p.amount for p in invoice.payments), Decimal("0"))
+        paid = sum((payment.amount for payment in invoice.payments), Decimal("0"))
         outstanding += max(invoice.amount - paid, Decimal("0"))
-    predictions = db.execute(select(RiskPrediction).join(Invoice, RiskPrediction.invoice_id == Invoice.id).where(Invoice.business_id == business_id).order_by(RiskPrediction.predicted_at.desc())).scalars().all()
+
+    predictions = db.execute(
+        select(RiskPrediction)
+        .join(Invoice, RiskPrediction.invoice_id == Invoice.id)
+        .where(Invoice.business_id == business_id)
+        .order_by(RiskPrediction.predicted_at.desc())
+    ).scalars().all()
+
     latest_by_invoice = {}
     for prediction in predictions:
         latest_by_invoice.setdefault(prediction.invoice_id, prediction)
-    cash_at_risk = sum((p.cash_at_risk for p in latest_by_invoice.values()), Decimal("0"))
-    return {"business_id": business_id, "invoice_count": len(invoices), "outstanding_receivables": float(outstanding), "cash_at_risk": float(cash_at_risk), "predicted_invoice_count": len(latest_by_invoice), "high_risk_invoice_count": sum(float(p.late_probability) >= 0.70 for p in latest_by_invoice.values())}
+
+    cash_at_risk = sum(
+        (prediction.cash_at_risk for prediction in latest_by_invoice.values()),
+        Decimal("0"),
+    )
+
+    return {
+        "business_id": business_id,
+        "invoice_count": len(invoices),
+        "outstanding_receivables": float(outstanding),
+        "cash_at_risk": float(cash_at_risk),
+        "predicted_invoice_count": len(latest_by_invoice),
+        "high_risk_invoice_count": sum(
+            float(prediction.late_probability) >= 0.70
+            for prediction in latest_by_invoice.values()
+        ),
+    }
