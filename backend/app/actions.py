@@ -68,7 +68,7 @@ def _action_plan(
     elif days_until_due <= 3:
         reasons.append(f"due in {days_until_due} days")
     if amount > Decimal("0"):
-        reasons.append(f"₹{amount:,.0f} invoice exposure")
+        reasons.append(f"₹{amount:,.0f} outstanding exposure")
 
     return {
         "action_type": action_type,
@@ -109,7 +109,8 @@ def generate_collection_actions(
 
     for invoice in invoices:
         paid = sum((payment.amount for payment in invoice.payments), Decimal("0"))
-        if paid >= invoice.amount:
+        outstanding_amount = max(invoice.amount - paid, Decimal("0"))
+        if outstanding_amount <= Decimal("0"):
             skipped_settled += 1
             continue
 
@@ -122,7 +123,7 @@ def generate_collection_actions(
             late_probability=float(prediction.late_probability),
             expected_delay_days=float(prediction.expected_delay_days),
             due_date=invoice.due_date,
-            amount=invoice.amount,
+            amount=outstanding_amount,
             as_of=as_of,
         )
 
@@ -141,7 +142,7 @@ def generate_collection_actions(
             action.priority_score = plan["priority_score"]
             action.due_date = invoice.due_date
             action.days_overdue = plan["days_overdue"]
-            action.amount = invoice.amount
+            action.amount = outstanding_amount
             action.reason = plan["next_step"] + " " + plan["reason"]
             action.updated_at = now
             if action.status == "open":
