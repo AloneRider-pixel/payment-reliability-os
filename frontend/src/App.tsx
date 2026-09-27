@@ -6,6 +6,7 @@ import type {
   Dashboard,
   EvaluationSummary,
   InvoiceRisk,
+  ModelStatus,
 } from "./api";
 import { analyzeAll, api, uploadInvoices, uploadPayments } from "./api";
 
@@ -36,6 +37,7 @@ export default function App() {
   const [invoices, setInvoices] = useState<InvoiceRisk[]>([]);
   const [evaluation, setEvaluation] = useState<EvaluationSummary | null>(null);
   const [backtest, setBacktest] = useState<BacktestResult | null>(null);
+  const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -52,11 +54,13 @@ export default function App() {
         api.customers(businessId),
         api.invoices(businessId),
         api.evaluations(businessId),
+        api.modelStatus(businessId),
       ]);
       setDashboard(results[0]);
       setCustomers(results[1]);
       setInvoices(results[2]);
       setEvaluation(results[3]);
+      setModelStatus(results[4]);
     } catch {
       setError("Unable to load the API. Start FastAPI and check the business ID.");
     } finally {
@@ -112,6 +116,26 @@ export default function App() {
       setError("Portfolio analysis failed. Import invoice and payment data first.");
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function runModelTraining() {
+    setBacktesting(true);
+    setError("");
+    setUploadMessage("");
+    try {
+      const result = await api.trainModel(businessId, 3);
+      setModelStatus(await api.modelStatus(businessId));
+      setUploadMessage(
+        result.promotion_status === "promoted"
+          ? "ML model promoted after beating or matching the baseline on both test metrics."
+          : "ML model kept as a candidate; the baseline remains active because the promotion gate was not met.",
+      );
+      await load();
+    } catch {
+      setError("ML training failed. The business needs enough historical settled invoices with both late and on-time outcomes.");
+    } finally {
+      setBacktesting(false);
     }
   }
 
@@ -349,8 +373,14 @@ export default function App() {
                 <span className="pill">
                   {evaluation?.evaluated_predictions ?? 0} evaluated
                 </span>
+                <span className={"model-state " + (modelStatus?.active ? "active" : "")}>
+                  {modelStatus?.active ? modelStatus.model_version : "baseline active"}
+                </span>
+                <button onClick={() => void runModelTraining()} disabled={backtesting || loading}>
+                  {backtesting ? "Training…" : "Train ML candidate"}
+                </button>
                 <button onClick={() => void runBacktest()} disabled={backtesting || loading}>
-                  {backtesting ? "Backtesting…" : "Run historical backtest"}
+                  {backtesting ? "Working…" : "Run historical backtest"}
                 </button>
               </div>
             </div>
@@ -385,6 +415,18 @@ export default function App() {
               score each settled invoice using only behavior available before
               that invoice was issued.
             </p>
+            {modelStatus?.metrics && (
+              <div className="model-compare">
+                <div>
+                  <strong>Candidate</strong>
+                  <span> Brier {modelStatus.metrics.candidate.mean_brier_error.toFixed(4)} · Date MAE {modelStatus.metrics.candidate.date_mae_days.toFixed(1)}d</span>
+                </div>
+                <div>
+                  <strong>Baseline</strong>
+                  <span> Brier {modelStatus.metrics.baseline.mean_brier_error.toFixed(4)} · Date MAE {modelStatus.metrics.baseline.date_mae_days.toFixed(1)}d</span>
+                </div>
+              </div>
+            )}
             {backtest && (
               <div className="backtest-summary">
                 <div className="backtest-head">
