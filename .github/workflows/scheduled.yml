@@ -10,9 +10,17 @@ on:
         required: false
         default: ""
 
+concurrency:
+  group: scheduled-operations
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 jobs:
   run-scheduled-operations:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       PYTHONPATH: .
