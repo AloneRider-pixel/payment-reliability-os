@@ -1,5 +1,6 @@
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+import json
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
@@ -9,6 +10,7 @@ from backend.app.entities import Business, Customer, Invoice, ModelRegistry, Pay
 from backend.app.ml import (
     ML_MODEL_VERSION,
     active_model_status,
+    predict_invoice_risk_with_active_model,
     rollback_active_model,
     train_business_model,
 )
@@ -171,6 +173,76 @@ def test_model_registry_supports_explicit_rollback():
             }
             assert states["ml-v0.1-second"] == "rolled_back"
             assert states["ml-v0.1-first"] == "active"
+        finally:
+            session.close()
+    finally:
+        db.engine, db.SessionLocal = old_engine, old_session
+
+
+
+def test_active_model_prediction_preserves_model_lineage():
+    old_engine, old_session = db.engine, db.SessionLocal
+    try:
+        db.engine = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+        )
+        db.SessionLocal = sessionmaker(
+            bind=db.engine,
+            autoflush=False,
+            autocommit=False,
+        )
+        db.init_db()
+
+        session = db.SessionLocal()
+        try:
+            business = Business(id="lineage-test", name="Lineage Test")
+            customer = Customer(
+                business_id=business.id,
+                external_key="buyer-lineage",
+                name="Buyer Lineage",
+            )
+            session.add_all([business, customer])
+            session.flush()
+
+            invoice = Invoice(
+                business_id=business.id,
+                customer_id=customer.id,
+                invoice_number="LIVE-1",
+                invoice_date=date(2026, 9, 20),
+                due_date=date(2026, 10, 1),
+                amount=Decimal("100000.00"),
+            )
+            session.add(invoice)
+            session.flush()
+            session.add(
+                ModelRegistry(
+                    business_id=business.id,
+                    model_version="ml-v0.1-active",
+                    status="active",
+                    trained_at=datetime(2026, 9, 20),
+                    train_count=20,
+                    test_count=6,
+                    metrics='{"candidate":{"mean_brier_error":0.1,"date_mae_days":2.0}}',
+                    artifact=json.dumps({
+                        "model_version": "ml-v0.1-active",
+                        "scaler_mean": [0.0] * 10,
+                        "scaler_scale": [1.0] * 10,
+                        "classifier_coefficients": [0.0] * 10,
+                        "classifier_intercept": 0.0,
+                        "regressor_coefficients": [0.0] * 10,
+                        "regressor_intercept": 2.0,
+                        "train_count": 20,
+                    }),
+                    reason="Test active model",
+                )
+            )
+            session.commit()
+
+            result = predict_invoice_risk_with_active_model(session, invoice.id)
+
+            assert result["model_version"] == "ml-v0.1-active"
+            assert "ml-v0.1-active" in result["reasons"][-1]
         finally:
             session.close()
     finally:
