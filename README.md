@@ -18,6 +18,7 @@ Upload invoice and payment history, then get:
 - A temporally trained ML candidate for late-risk and payment-delay prediction
 - Persistent model registry with promotion history and rollback
 - Leakage-safe model drift monitoring and retraining triggers
+- Deterministic receivables action engine with human-in-the-loop completion
 
 The score is an **operational payment-behavior index**, not a regulated credit rating and not a standalone lending or underwriting decision.
 
@@ -82,6 +83,10 @@ Key endpoints:
 - `GET /models/drift/latest` — retrieve the latest persisted drift snapshot
 - `POST /models/retrain-if-needed` — measure drift and train a candidate only when the retraining policy is triggered
 - `POST /models/rollback` — restore the previous promoted ML model
+- `POST /actions/generate` — generate explainable receivables actions for outstanding scored invoices
+- `GET /actions` — retrieve the open/completed/dismissed action queue
+- `GET /actions/summary` — summarize open collection workload and exposure
+- `POST /actions/{action_id}/status` — mark a recommended action open, completed, or dismissed
 - `POST /score/buyer` — score supplied buyer history without persistence
 
 ## ML model lifecycle
@@ -107,6 +112,20 @@ The active model's training feature means and scales are used as the reference d
 The default operating policy recommends retraining when the aggregate drift score reaches `0.75` or any feature reaches `1.50σ`, provided the recent cohort has at least 12 eligible samples. These are operational thresholds for the prototype, not statistical significance tests.
 
 `POST /models/retrain-if-needed` records a drift snapshot and triggers the existing temporal training pipeline only when the policy recommends retraining. The candidate still must pass the baseline promotion gate before becoming active.
+
+
+### Receivables action engine
+
+The action engine is deliberately deterministic and separate from the ML model. It converts the latest invoice prediction plus due-date state into an operational next step:
+
+- `MONITOR` — no immediate collection action
+- `PRE_DUE_REMINDER` — routine reminder
+- `PRE_DUE_PRIORITY` — pre-due contact for elevated modeled risk
+- `COLLECTION_FOLLOW_UP` — follow up on an overdue balance
+- `PRIORITY_COLLECTION` — confirm a committed payment date for materially overdue/high-risk invoices
+- `ESCALATION_REVIEW` — account-owner review for materially overdue, high-risk balances
+
+Each action stores its priority score, outstanding exposure, model version, due-date state, and an explainable reason. Completing an action only records workflow state; the product does not automatically send collection messages or alter commercial terms.
 
 ## Validation discipline
 
