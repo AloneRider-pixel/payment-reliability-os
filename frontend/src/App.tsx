@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ChangeEvent } from "react";
 import { analyzeAll, api, uploadInvoices, uploadPayments, CustomerRisk, Dashboard, EvaluationSummary, InvoiceRisk } from "./api";
 
 const DEFAULT_BUSINESS = "demo";
@@ -39,7 +40,7 @@ export default function App() {
     }
   }
 
-  async function handleUpload(event: React.ChangeEvent<HTMLInputElement>, kind: "invoice" | "payment") {
+  async function handleUpload(event: ChangeEvent<HTMLInputElement>, kind: "invoice" | "payment") {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
