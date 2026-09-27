@@ -70,3 +70,19 @@ class PredictionEvaluation(Base):
     evaluated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     prediction: Mapped[RiskPrediction] = relationship()
     __table_args__ = (UniqueConstraint("prediction_id", name="uq_prediction_evaluation_prediction"),)
+
+class ModelRegistry(Base):
+    __tablename__ = "model_registry"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), index=True)
+    model_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="candidate")
+    trained_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    train_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    test_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    metrics: Mapped[str] = mapped_column(Text, nullable=False)
+    artifact: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    __table_args__ = (
+        UniqueConstraint("business_id", "model_version", name="uq_model_business_version"),
+    )
