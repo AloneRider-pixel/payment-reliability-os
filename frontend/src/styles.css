@@ -46,3 +46,15 @@ h1{margin:6px 0 0;font-size:clamp(28px,4vw,48px);line-height:1.05;max-width:840p
 .model-compare strong{display:block;font-size:12px}
 .model-compare span{display:block;color:#78849d;font-size:12px;margin-top:5px}
 @media(max-width:600px){.model-compare{grid-template-columns:1fr}}
+
+.drift-summary{margin-top:12px;padding:14px;border:1px solid #19243a;border-radius:12px;background:#0a1120}
+.drift-head{display:flex;justify-content:space-between;gap:14px;align-items:center}
+.drift-head>div{display:grid;gap:4px}.drift-head>div>span{color:#72809b;font-size:11px}
+.drift-state{font-size:11px;font-weight:800;padding:7px 9px;border-radius:999px;border:1px solid #23304a;color:#9eabc0;text-transform:uppercase}
+.drift-state.retrain_recommended{color:#ffafbe;border-color:#6a3140}
+.drift-state.stable{color:#8fe2ba;border-color:#2a5947}
+.drift-state.insufficient_data,.drift-state.no_active_model{color:#e6c98a;border-color:#5b4b29}
+.drift-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+.drift-metrics span{color:#7f8ba6;font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+.drift-metrics strong{display:block;margin-top:6px;color:#dbe5f5;font-size:18px;text-transform:none;letter-spacing:0}
+@media(max-width:600px){.drift-head{align-items:flex-start;flex-direction:column}.drift-metrics{grid-template-columns:1fr}}
