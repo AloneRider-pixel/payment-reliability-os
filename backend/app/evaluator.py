@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from backend.app.entities import Invoice, Payment, PredictionEvaluation, RiskPrediction
+from backend.app.entities import Invoice, PredictionEvaluation, RiskPrediction
 
 def evaluate_prediction(session: Session, prediction_id: int) -> dict:
     prediction = session.scalar(
@@ -27,7 +27,8 @@ def evaluate_prediction(session: Session, prediction_id: int) -> dict:
     if not invoice:
         raise ValueError("invoice not found")
 
-    paid_total = sum((p.amount for p in invoice.payments), invoice.amount.__class__("0"))
+    from decimal import Decimal
+    paid_total = sum((p.amount for p in invoice.payments), Decimal("0"))
     if paid_total < invoice.amount:
         raise ValueError("invoice is not fully settled")
 
