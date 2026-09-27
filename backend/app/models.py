@@ -1,5 +1,7 @@
 from datetime import date
+
 from pydantic import BaseModel, Field
+
 
 class BuyerHistory(BaseModel):
     payment_delays_days: list[float] = Field(default_factory=list)
@@ -8,6 +10,7 @@ class BuyerHistory(BaseModel):
     recent_delays_days: list[float] = Field(default_factory=list)
     average_invoice_amount: float = 0
     current_outstanding_amount: float = 0
+
 
 class InvoiceInput(BaseModel):
     due_date: date
