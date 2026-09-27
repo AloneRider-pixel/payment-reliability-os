@@ -15,6 +15,8 @@ from backend.app.scoring import MODEL_VERSION as BASELINE_MODEL_VERSION
 from backend.app.scoring import predict_invoice_risk
 
 MODEL_FAMILY_VERSION = "ml-v0.1"
+# Backward-compatible public name retained for existing integrations.
+ML_MODEL_VERSION = MODEL_FAMILY_VERSION
 FEATURE_NAMES = [
     "on_time_rate",
     "late_payment_rate",
