@@ -86,3 +86,17 @@ class ModelRegistry(Base):
     __table_args__ = (
         UniqueConstraint("business_id", "model_version", name="uq_model_business_version"),
     )
+
+
+class ModelDriftSnapshot(Base):
+    __tablename__ = "model_drift_snapshots"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), index=True)
+    model_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    measured_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    drift_score: Mapped[float] = mapped_column(Numeric(10, 6), nullable=False)
+    max_feature_shift: Mapped[float] = mapped_column(Numeric(10, 6), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    recommendation: Mapped[str] = mapped_column(String(32), nullable=False)
+    details: Mapped[str] = mapped_column(Text, nullable=False)
