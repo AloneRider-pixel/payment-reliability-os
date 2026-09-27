@@ -1,0 +1,35 @@
+name: Scheduled Operations
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      business_id:
+        description: "Optional business ID; blank runs all businesses"
+        required: false
+        default: ""
+
+jobs:
+  run-scheduled-operations:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run daily operations
+        run: |
+          if [ -n "${{ inputs.business_id }}" ]; then
+            python scripts/run_scheduled_jobs.py --business-id "${{ inputs.business_id }}"
+          else
+            python scripts/run_scheduled_jobs.py
+          fi
