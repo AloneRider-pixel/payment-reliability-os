@@ -374,7 +374,11 @@ export default function App() {
                   {evaluation?.evaluated_predictions ?? 0} evaluated
                 </span>
                 <span className={"model-state " + (modelStatus?.active ? "active" : "")}>
-                  {modelStatus?.active ? modelStatus.model_version : "baseline active"}
+                  {modelStatus?.active
+                    ? modelStatus.model_version
+                    : modelStatus?.candidate_model_version
+                      ? "candidate: " + modelStatus.candidate_model_version
+                      : "baseline active"}
                 </span>
                 <button onClick={() => void runModelTraining()} disabled={backtesting || loading}>
                   {backtesting ? "Training…" : "Train ML candidate"}
