@@ -178,13 +178,20 @@ def risk_invoices(
         .join(Invoice, RiskPrediction.invoice_id == Invoice.id)
         .join(Customer, Invoice.customer_id == Customer.id)
         .where(Invoice.business_id == business_id)
-        .order_by(RiskPrediction.late_probability.desc(), RiskPrediction.cash_at_risk.desc())
-        .limit(limit)
+        .order_by(RiskPrediction.predicted_at.desc())
+        .limit(limit * 5)
     ).all()
     latest = {}
     for prediction, invoice, customer in rows:
         if prediction.late_probability >= threshold:
-            latest.setdefault(invoice.id, (prediction, invoice, customer))
+            previous = latest.get(invoice.id)
+            if previous is None or prediction.predicted_at > previous[0].predicted_at:
+                latest[invoice.id] = (prediction, invoice, customer)
+    latest = dict(sorted(
+        latest.items(),
+        key=lambda item: (float(item[1][0].late_probability), float(item[1][0].late_probability)),
+        reverse=True,
+    )[:limit])
     return [
         {
             "invoice_id": invoice.id,
