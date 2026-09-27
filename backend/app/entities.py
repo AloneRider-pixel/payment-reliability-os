@@ -57,3 +57,16 @@ class RiskPrediction(Base):
     cash_at_risk: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     model_version: Mapped[str] = mapped_column(String(64), nullable=False)
     reasons: Mapped[str] = mapped_column(Text, nullable=False)
+
+class PredictionEvaluation(Base):
+    __tablename__ = "prediction_evaluations"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    prediction_id: Mapped[int] = mapped_column(ForeignKey("risk_predictions.id"), unique=True, index=True)
+    actual_payment_date: Mapped[date] = mapped_column(Date, nullable=False)
+    actual_delay_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    actual_late: Mapped[bool] = mapped_column(nullable=False)
+    payment_date_error_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    probability_brier_error: Mapped[float] = mapped_column(Numeric(10, 8), nullable=False)
+    evaluated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    prediction: Mapped[RiskPrediction] = relationship()
+    __table_args__ = (UniqueConstraint("prediction_id", name="uq_prediction_evaluation_prediction"),)
