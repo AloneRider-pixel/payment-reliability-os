@@ -67,6 +67,31 @@ export type EvaluationSummary = {
   late_classification_accuracy: number | null;
 };
 
+export type ModelStatus = {
+  business_id: string;
+  active: boolean;
+  model_version: string;
+  trained_at?: string;
+  train_count?: number;
+  test_count?: number;
+  metrics?: {
+    candidate: {
+      date_mae_days: number;
+      mean_brier_error: number;
+      late_classification_accuracy: number;
+    };
+    baseline: {
+      date_mae_days: number;
+      mean_brier_error: number;
+      late_classification_accuracy: number;
+    };
+    delta: {
+      date_mae_days: number;
+      mean_brier_error: number;
+    };
+  };
+};
+
 export type BacktestResult = {
   business_id: string;
   model_version: string;
@@ -112,6 +137,28 @@ export const api = {
   evaluations: (businessId: string) =>
     getJson<EvaluationSummary>(
       "/evaluations/summary?business_id=" + encodeURIComponent(businessId),
+    ),
+  modelStatus: (businessId: string) =>
+    getJson<ModelStatus>(
+      "/models/status?business_id=" + encodeURIComponent(businessId),
+    ),
+  trainModel: (businessId: string, minHistory = 3) =>
+    postJson<{
+      promotion_status: "promoted" | "candidate_only";
+      train_count: number;
+      test_count: number;
+      model_version: string;
+      candidate_metrics: ModelStatus["metrics"]["candidate"];
+      baseline_metrics: ModelStatus["metrics"]["baseline"];
+      delta: {
+        date_mae_days: number;
+        mean_brier_error: number;
+      };
+    }>(
+      "/models/train?business_id=" +
+        encodeURIComponent(businessId) +
+        "&min_history=" +
+        minHistory,
     ),
   backtest: (businessId: string, minHistory = 3) =>
     postJson<BacktestResult>(
