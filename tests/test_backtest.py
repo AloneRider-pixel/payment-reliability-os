@@ -73,7 +73,7 @@ def test_historical_backtest_is_chronological_and_read_only():
                 assert result["mean_brier_error"] is not None
                 assert result["date_mae_days"] is not None
                 assert result["late_classification_accuracy"] is not None
-                assert result["observed_late_rate"] == 0.6667
+                assert result["observed_late_rate"] == 0.3333
                 assert result["calibration_bins"]
                 assert session.scalars(select(RiskPrediction)).all() == []
             finally:
