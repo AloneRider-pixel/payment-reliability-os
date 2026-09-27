@@ -6,10 +6,19 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from backend.app import db
-from backend.app.entities import Business, Customer, Invoice, ModelRegistry, Payment
+from backend.app.entities import (
+    Business,
+    Customer,
+    Invoice,
+    ModelDriftSnapshot,
+    ModelRegistry,
+    Payment,
+)
 from backend.app.ml import (
     ML_MODEL_VERSION,
     active_model_status,
+    assess_model_drift,
+    latest_model_drift,
     predict_invoice_risk_with_active_model,
     rollback_active_model,
     train_business_model,
@@ -243,6 +252,160 @@ def test_active_model_prediction_preserves_model_lineage():
 
             assert result["model_version"] == "ml-v0.1-active"
             assert "ml-v0.1-active" in result["reasons"][-1]
+        finally:
+            session.close()
+    finally:
+        db.engine, db.SessionLocal = old_engine, old_session
+
+
+
+def test_model_drift_monitoring_persists_snapshot():
+    old_engine, old_session = db.engine, db.SessionLocal
+    try:
+        db.engine = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+        )
+        db.SessionLocal = sessionmaker(
+            bind=db.engine,
+            autoflush=False,
+            autocommit=False,
+        )
+        db.init_db()
+
+        session = db.SessionLocal()
+        try:
+            business = Business(id="drift-test", name="Drift Test")
+            customer = Customer(
+                business_id=business.id,
+                external_key="buyer-drift",
+                name="Buyer Drift",
+            )
+            session.add_all([business, customer])
+            session.flush()
+
+            active_artifact = {
+                "model_version": "ml-v0.1-drift",
+                "scaler_mean": [0.0] * 10,
+                "scaler_scale": [1.0] * 10,
+            }
+            session.add(
+                ModelRegistry(
+                    business_id=business.id,
+                    model_version="ml-v0.1-drift",
+                    status="active",
+                    trained_at=datetime(2026, 9, 1),
+                    train_count=20,
+                    test_count=6,
+                    metrics='{"candidate":{"mean_brier_error":0.1,"date_mae_days":2.0}}',
+                    artifact=json.dumps(active_artifact),
+                    reason="Drift test model",
+                )
+            )
+
+            for index in range(15):
+                invoice_date = date(2026, 6, 1) + timedelta(days=index * 2)
+                due_date = invoice_date + timedelta(days=10)
+                invoice = Invoice(
+                    business_id=business.id,
+                    customer_id=customer.id,
+                    invoice_number=f"D-{index + 1}",
+                    invoice_date=invoice_date,
+                    due_date=due_date,
+                    amount=Decimal("100000.00"),
+                )
+                session.add(invoice)
+                session.flush()
+                session.add(
+                    Payment(
+                        invoice_id=invoice.id,
+                        payment_date=due_date,
+                        amount=Decimal("100000.00"),
+                    )
+                )
+
+            session.commit()
+
+            result = assess_model_drift(
+                session,
+                business.id,
+                recent_window=15,
+                min_history=0,
+                min_samples=12,
+            )
+
+            assert result["sample_count"] == 15
+            assert result["drift_score"] > 0.75
+            assert result["recommendation"] == "retrain"
+            assert len(result["features"]) == 10
+
+            latest = latest_model_drift(session, business.id)
+            assert latest is not None
+            assert latest["model_version"] == "ml-v0.1-drift"
+            assert latest["recommendation"] == "retrain"
+
+            snapshot = session.scalar(
+                select(ModelDriftSnapshot)
+                .where(ModelDriftSnapshot.business_id == business.id)
+                .order_by(ModelDriftSnapshot.id.desc())
+            )
+            assert snapshot is not None
+            assert snapshot.status == "retrain_recommended"
+        finally:
+            session.close()
+    finally:
+        db.engine, db.SessionLocal = old_engine, old_session
+
+
+def test_model_drift_monitoring_handles_insufficient_data():
+    old_engine, old_session = db.engine, db.SessionLocal
+    try:
+        db.engine = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+        )
+        db.SessionLocal = sessionmaker(
+            bind=db.engine,
+            autoflush=False,
+            autocommit=False,
+        )
+        db.init_db()
+
+        session = db.SessionLocal()
+        try:
+            business = Business(id="drift-small", name="Small Drift")
+            session.add(business)
+            session.flush()
+            session.add(
+                ModelRegistry(
+                    business_id=business.id,
+                    model_version="ml-v0.1-small",
+                    status="active",
+                    trained_at=datetime(2026, 9, 1),
+                    train_count=20,
+                    test_count=6,
+                    metrics='{"candidate":{"mean_brier_error":0.1,"date_mae_days":2.0}}',
+                    artifact=json.dumps({
+                        "model_version": "ml-v0.1-small",
+                        "scaler_mean": [0.0] * 10,
+                        "scaler_scale": [1.0] * 10,
+                    }),
+                    reason="Small-data test model",
+                )
+            )
+            session.commit()
+
+            result = assess_model_drift(
+                session,
+                business.id,
+                recent_window=10,
+                min_history=0,
+                min_samples=12,
+            )
+
+            assert result["status"] == "insufficient_data"
+            assert result["recommendation"] == "monitor"
+            assert result["sample_count"] == 0
         finally:
             session.close()
     finally:
