@@ -94,6 +94,14 @@ export type ModelStatus = {
   train_count?: number;
   test_count?: number;
   metrics?: ModelMetrics;
+  history?: Array<{
+    model_version: string;
+    status: string;
+    trained_at: string;
+    train_count: number;
+    test_count: number;
+    reason: string;
+  }>;
 };
 
 export type BacktestResult = {
@@ -145,6 +153,17 @@ export const api = {
   modelStatus: (businessId: string) =>
     getJson<ModelStatus>(
       "/models/status?business_id=" + encodeURIComponent(businessId),
+    ),
+  rollbackModel: (businessId: string, targetVersion?: string) =>
+    postJson<{ 
+      business_id: string;
+      rolled_back_from: string;
+      active_model_version: string;
+      status: string;
+    }>(
+      "/models/rollback?business_id=" +
+        encodeURIComponent(businessId) +
+        (targetVersion ? "&target_version=" + encodeURIComponent(targetVersion) : ""),
     ),
   trainModel: (businessId: string, minHistory = 3) =>
     postJson<{
