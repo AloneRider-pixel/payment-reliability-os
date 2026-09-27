@@ -16,6 +16,7 @@ from backend.app.actions import (
     list_collection_actions,
     update_collection_action_status,
 )
+from backend.app.scheduler import recent_job_runs, run_scheduled_jobs
 from backend.app.entities import (
     Business,
     Customer,
@@ -41,7 +42,7 @@ db.init_db()
 
 app = FastAPI(
     title="Payment Reliability OS",
-    version="0.7.0",
+    version="0.8.0",
     description="Explainable B2B payment-behavior intelligence.",
 )
 
@@ -325,6 +326,15 @@ def collection_action_status(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/jobs/runs")
+def scheduled_job_runs(
+    business_id: str = Query(min_length=1),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    return recent_job_runs(db, business_id, limit=limit)
 
 
 @app.get("/predictions")
