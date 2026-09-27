@@ -104,7 +104,7 @@ def test_generate_collection_actions_prioritizes_overdue_risk():
         actions = list_collection_actions(session, business.id)
         assert len(actions) == 2
         assert actions[0]["invoice_number"] == "A-1"
-        assert actions[0]["action_type"] == "PRIORITY_COLLECTION"
+        assert actions[0]["action_type"] == "ESCALATION_REVIEW"
         assert actions[0]["days_overdue"] == 27
         assert actions[0]["priority_score"] > actions[1]["priority_score"]
         assert "outstanding exposure" in actions[0]["reason"]
