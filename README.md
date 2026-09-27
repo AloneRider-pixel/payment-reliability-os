@@ -16,6 +16,7 @@ Upload invoice and payment history, then get:
 - Prediction-vs-actual evaluation metrics
 - Leakage-safe historical backtesting
 - A temporally trained ML candidate for late-risk and payment-delay prediction
+- Persistent model registry with promotion history and rollback
 
 The score is an **operational payment-behavior index**, not a regulated credit rating and not a standalone lending or underwriting decision.
 
@@ -92,7 +93,7 @@ The candidate contains:
 - Temporal train/test metrics
 - A promotion gate requiring the candidate to match or improve the baseline on both Brier error and payment-date MAE
 
-When the gate is not met, the baseline remains active. When an ML model is active, live invoice analysis uses it automatically. Runtime artifacts are stored under `.models/` and are intentionally excluded from Git.
+When the gate is not met, the baseline remains active. When an ML model is active, live invoice analysis uses it automatically. Model artifacts, metrics, lineage, and lifecycle state are stored in the `model_registry` database table, so deployments do not depend on local filesystem state. Previous promoted versions are retained for rollback.
 
 ## Validation discipline
 
