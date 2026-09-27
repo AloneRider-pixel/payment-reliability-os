@@ -1,0 +1,4 @@
+invoice_number,customer,payment_date,amount_paid
+INV-1001,ABC Industries,2026-09-20,100000
+INV-1002,ABC Industries,2026-10-06,200000
+INV-1003,XYZ Components,2026-09-30,150000
