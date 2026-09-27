@@ -19,7 +19,9 @@ jobs:
         run: pip install -r backend/requirements.txt
 
       - name: Backend tests
-        run: pytest -q
+        env:
+          PYTHONPATH: .
+        run: python -m pytest -q
 
       - uses: actions/setup-node@v4
         with:
