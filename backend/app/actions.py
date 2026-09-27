@@ -4,7 +4,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.app.entities import CollectionAction, Invoice, RiskPrediction
+from backend.app.entities import CollectionAction, Customer, Invoice, RiskPrediction
 from backend.app.ml import predict_invoice_risk_with_active_model
 
 
@@ -189,8 +189,9 @@ def list_collection_actions(
     limit: int = 100,
 ) -> list[dict]:
     rows = session.execute(
-        select(CollectionAction, Invoice, RiskPrediction)
+        select(CollectionAction, Invoice, Customer, RiskPrediction)
         .join(Invoice, CollectionAction.invoice_id == Invoice.id)
+        .join(Customer, Invoice.customer_id == Customer.id)
         .outerjoin(
             RiskPrediction,
             CollectionAction.prediction_id == RiskPrediction.id,
@@ -212,6 +213,7 @@ def list_collection_actions(
             "action_id": action.id,
             "invoice_id": invoice.id,
             "invoice_number": invoice.invoice_number,
+            "customer": customer.name,
             "action_type": action.action_type,
             "priority_score": float(action.priority_score),
             "status": action.status,
@@ -229,7 +231,7 @@ def list_collection_actions(
             "created_at": action.created_at,
             "updated_at": action.updated_at,
         }
-        for action, invoice, prediction in rows
+        for action, invoice, customer, prediction in rows
     ]
 
 
