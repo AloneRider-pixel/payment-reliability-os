@@ -3,6 +3,7 @@ from decimal import Decimal
 import json
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
