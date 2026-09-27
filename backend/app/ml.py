@@ -8,7 +8,7 @@ from sklearn.preprocessing import StandardScaler
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from backend.app.entities import Invoice, ModelRegistry
+from backend.app.entities import Invoice, ModelDriftSnapshot, ModelRegistry
 from backend.app.evaluator import _history_before_invoice
 from backend.app.models import BuyerHistory, InvoiceInput
 from backend.app.scoring import MODEL_VERSION as BASELINE_MODEL_VERSION
@@ -580,4 +580,233 @@ def predict_invoice_risk_with_active_model(
         "cash_at_risk": cash_at_risk,
         "reasons": reasons,
         "model_version": artifact["model_version"],
+    }
+
+
+
+DRIFT_SCORE_THRESHOLD = 0.75
+MAX_FEATURE_SHIFT_THRESHOLD = 1.50
+
+
+def _monitoring_feature_samples(
+    session: Session,
+    business_id: str,
+    recent_window: int,
+    min_history: int,
+) -> list[list[float]]:
+    invoices = session.scalars(
+        select(Invoice)
+        .options(selectinload(Invoice.payments))
+        .where(Invoice.business_id == business_id)
+        .order_by(Invoice.invoice_date.desc(), Invoice.id.desc())
+        .limit(max(recent_window * 3, recent_window)),
+    ).all()
+
+    customer_invoices: dict[int, list[Invoice]] = {}
+    all_invoices = session.scalars(
+        select(Invoice)
+        .options(selectinload(Invoice.payments))
+        .where(Invoice.business_id == business_id)
+        .order_by(Invoice.invoice_date, Invoice.id),
+    ).all()
+    for invoice in all_invoices:
+        customer_invoices.setdefault(invoice.customer_id, []).append(invoice)
+
+    samples: list[list[float]] = []
+    for invoice in invoices:
+        if not _settled(invoice):
+            continue
+        history = _history_before_invoice(
+            customer_invoices[invoice.customer_id],
+            invoice,
+        )
+        if history.invoice_count < min_history:
+            continue
+        samples.append(_feature_vector(history, float(invoice.amount)))
+        if len(samples) >= recent_window:
+            break
+    return samples
+
+
+def assess_model_drift(
+    session: Session,
+    business_id: str,
+    recent_window: int = 30,
+    min_history: int = 3,
+    min_samples: int = 12,
+) -> dict:
+    if recent_window < 1:
+        raise ValueError("recent_window must be positive")
+    if min_history < 0:
+        raise ValueError("min_history must be non-negative")
+    if min_samples < 1:
+        raise ValueError("min_samples must be positive")
+
+    active = session.scalar(
+        select(ModelRegistry)
+        .where(
+            ModelRegistry.business_id == business_id,
+            ModelRegistry.status == "active",
+        )
+        .order_by(ModelRegistry.id.desc()),
+    )
+    measured_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    if not active:
+        result = {
+            "business_id": business_id,
+            "model_version": BASELINE_MODEL_VERSION,
+            "measured_at": measured_at,
+            "sample_count": 0,
+            "drift_score": None,
+            "max_feature_shift": None,
+            "status": "no_active_model",
+            "recommendation": "initial_train",
+            "features": [],
+        }
+        return result
+
+    artifact = json.loads(active.artifact)
+    samples = _monitoring_feature_samples(
+        session,
+        business_id,
+        recent_window=recent_window,
+        min_history=min_history,
+    )
+
+    if len(samples) < min_samples:
+        status = "insufficient_data"
+        recommendation = "monitor"
+        feature_details = []
+        drift_score = 0.0
+        max_feature_shift = 0.0
+    else:
+        means = [float(value) for value in artifact["scaler_mean"]]
+        scales = [
+            abs(float(value)) if abs(float(value)) > 1e-12 else 1.0
+            for value in artifact["scaler_scale"]
+        ]
+        feature_details = []
+        shifts = []
+
+        for index, feature_name in enumerate(FEATURE_NAMES):
+            recent_mean = sum(row[index] for row in samples) / len(samples)
+            shift = abs(recent_mean - means[index]) / scales[index]
+            shifts.append(shift)
+            feature_details.append(
+                {
+                    "name": feature_name,
+                    "training_mean": round(means[index], 6),
+                    "training_scale": round(scales[index], 6),
+                    "recent_mean": round(recent_mean, 6),
+                    "standardized_mean_shift": round(shift, 6),
+                }
+            )
+
+        drift_score = sum(shifts) / len(shifts)
+        max_feature_shift = max(shifts, default=0.0)
+        retrain = (
+            drift_score >= DRIFT_SCORE_THRESHOLD
+            or max_feature_shift >= MAX_FEATURE_SHIFT_THRESHOLD
+        )
+        status = "retrain_recommended" if retrain else "stable"
+        recommendation = "retrain" if retrain else "monitor"
+
+    result = {
+        "business_id": business_id,
+        "model_version": active.model_version,
+        "measured_at": measured_at,
+        "sample_count": len(samples),
+        "drift_score": round(drift_score, 6) if drift_score is not None else None,
+        "max_feature_shift": (
+            round(max_feature_shift, 6)
+            if max_feature_shift is not None
+            else None
+        ),
+        "status": status,
+        "recommendation": recommendation,
+        "features": feature_details,
+    }
+
+    session.add(
+        ModelDriftSnapshot(
+            business_id=business_id,
+            model_version=active.model_version,
+            measured_at=measured_at,
+            sample_count=len(samples),
+            drift_score=float(drift_score or 0.0),
+            max_feature_shift=float(max_feature_shift or 0.0),
+            status=status,
+            recommendation=recommendation,
+            details=json.dumps(feature_details),
+        )
+    )
+    session.commit()
+    return result
+
+
+def latest_model_drift(session: Session, business_id: str) -> dict | None:
+    row = session.scalar(
+        select(ModelDriftSnapshot)
+        .where(ModelDriftSnapshot.business_id == business_id)
+        .order_by(ModelDriftSnapshot.measured_at.desc(), ModelDriftSnapshot.id.desc()),
+    )
+    if not row:
+        return None
+    return {
+        "business_id": business_id,
+        "model_version": row.model_version,
+        "measured_at": row.measured_at,
+        "sample_count": row.sample_count,
+        "drift_score": float(row.drift_score),
+        "max_feature_shift": float(row.max_feature_shift),
+        "status": row.status,
+        "recommendation": row.recommendation,
+        "features": json.loads(row.details),
+    }
+
+
+def retrain_if_needed(
+    session: Session,
+    business_id: str,
+    recent_window: int = 30,
+    min_history: int = 3,
+    min_samples: int = 12,
+) -> dict:
+    drift = assess_model_drift(
+        session,
+        business_id,
+        recent_window=recent_window,
+        min_history=min_history,
+        min_samples=min_samples,
+    )
+
+    if drift["recommendation"] == "initial_train":
+        return {
+            "business_id": business_id,
+            "retrained": False,
+            "reason": "no_active_model",
+            "drift": drift,
+        }
+
+    if drift["recommendation"] != "retrain":
+        return {
+            "business_id": business_id,
+            "retrained": False,
+            "reason": "drift_below_threshold",
+            "drift": drift,
+        }
+
+    training = train_business_model(
+        session,
+        business_id,
+        min_history=min_history,
+        test_fraction=0.30,
+    )
+    return {
+        "business_id": business_id,
+        "retrained": True,
+        "reason": "drift_triggered_training",
+        "drift": drift,
+        "training": training,
     }
