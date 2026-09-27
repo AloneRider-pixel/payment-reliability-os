@@ -104,6 +104,39 @@ export type ModelStatus = {
   }>;
 };
 
+export type CollectionAction = {
+  action_id: number;
+  invoice_id: number;
+  invoice_number: string;
+  action_type:
+    | "MONITOR"
+    | "PRE_DUE_REMINDER"
+    | "PRE_DUE_PRIORITY"
+    | "COLLECTION_FOLLOW_UP"
+    | "PRIORITY_COLLECTION"
+    | "ESCALATION_REVIEW";
+  priority_score: number;
+  status: "open" | "completed" | "dismissed";
+  due_date: string;
+  days_overdue: number;
+  amount: number;
+  late_probability: number | null;
+  expected_delay_days: number | null;
+  model_version: string;
+  reason: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ActionSummary = {
+  business_id: string;
+  open_actions: number;
+  priority_actions: number;
+  overdue_actions: number;
+  cash_in_action_queue: number;
+  next_action: string | null;
+};
+
 export type ModelDrift = {
   business_id: string;
   model_version: string;
@@ -167,6 +200,27 @@ async function getJson<T>(path: string): Promise<T> {
 }
 
 export const api = {
+  actions: (businessId: string) =>
+    getJson<CollectionAction[]>(
+      "/actions?business_id=" + encodeURIComponent(businessId),
+    ),
+  actionSummary: (businessId: string) =>
+    getJson<ActionSummary>(
+      "/actions/summary?business_id=" + encodeURIComponent(businessId),
+    ),
+  generateActions: (businessId: string) =>
+    postJson<{
+      actions_created: number;
+      actions_updated: number;
+      skipped: number;
+    }>(
+      "/actions/generate?business_id=" + encodeURIComponent(businessId),
+    ),
+  updateActionStatus: (actionId: number, status: "open" | "completed" | "dismissed") =>
+    postJson<{ action_id: number; status: string; updated_at: string }>(
+      "/actions/" + actionId + "/status",
+      { status },
+    ),
   dashboard: (businessId: string) =>
     getJson<Dashboard>("/dashboard?business_id=" + encodeURIComponent(businessId)),
   customers: (businessId: string) =>
@@ -238,8 +292,12 @@ export const api = {
     ),
 };
 
-async function postJson<T>(path: string): Promise<T> {
-  const response = await fetch(API_BASE + path, { method: "POST" });
+async function postJson<T>(path: string, body?: unknown): Promise<T> {
+  const response = await fetch(API_BASE + path, {
+    method: "POST",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
   if (!response.ok) throw new Error("API " + response.status);
   return response.json() as Promise<T>;
 }
