@@ -12,3 +12,4 @@ build/
 *.db
 .DS_Store
 frontend/node_modules/
+.models/
