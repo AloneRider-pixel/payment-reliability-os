@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.db import SessionLocal, init_db
-from backend.app.entities import Business, Customer, Invoice, RiskPrediction
+from backend.app.entities import Business, Customer, Invoice, PredictionEvaluation, RiskPrediction
 from backend.app.import_service import import_invoices, import_payments
 from backend.app.models import BuyerHistory, InvoiceInput
 from backend.app.repository import buyer_history, invoice_input
@@ -17,7 +17,7 @@ from backend.app.scoring import predict_invoice_risk, score_buyer
 
 init_db()
 
-app = FastAPI(title="Payment Reliability OS", version="0.2.0", description="Explainable B2B payment-behavior intelligence.")
+app = FastAPI(title="Payment Reliability OS", version="0.3.0", description="Explainable B2B payment-behavior intelligence.")
 
 class BuyerScoreResponse(BaseModel):
     score: float
