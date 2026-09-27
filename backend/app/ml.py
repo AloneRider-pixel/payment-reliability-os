@@ -782,11 +782,33 @@ def retrain_if_needed(
     )
 
     if drift["recommendation"] == "initial_train":
+        samples, skipped_cold_start = _collect_samples(
+            session,
+            business_id,
+            min_history,
+        )
+        if len(samples) < 12:
+            return {
+                "business_id": business_id,
+                "retrained": False,
+                "reason": "initial_train_insufficient_data",
+                "drift": drift,
+                "eligible_samples": len(samples),
+                "skipped_cold_start": skipped_cold_start,
+            }
+
+        training = train_business_model(
+            session,
+            business_id,
+            min_history=min_history,
+            test_fraction=0.30,
+        )
         return {
             "business_id": business_id,
-            "retrained": False,
-            "reason": "no_active_model",
+            "retrained": True,
+            "reason": "initial_train",
             "drift": drift,
+            "training": training,
         }
 
     if drift["recommendation"] != "retrain":
