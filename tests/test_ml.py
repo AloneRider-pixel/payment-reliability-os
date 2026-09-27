@@ -1,21 +1,20 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from backend.app import db
-from backend.app.entities import Business, Customer, Invoice, Payment
+from backend.app.entities import Business, Customer, Invoice, ModelRegistry, Payment
 from backend.app.ml import (
     ML_MODEL_VERSION,
     active_model_status,
+    rollback_active_model,
     train_business_model,
 )
 
 
-def test_temporal_model_training_uses_prior_history_and_writes_artifact(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
-
+def test_temporal_model_training_persists_registry_entry(monkeypatch):
     old_engine, old_session = db.engine, db.SessionLocal
     try:
         db.engine = create_engine(
@@ -65,7 +64,7 @@ def test_temporal_model_training_uses_prior_history_and_writes_artifact(monkeypa
 
             session.commit()
 
-            status_before = active_model_status(business.id)
+            status_before = active_model_status(session, business.id)
             assert status_before["active"] is False
 
             result = train_business_model(
@@ -75,22 +74,103 @@ def test_temporal_model_training_uses_prior_history_and_writes_artifact(monkeypa
                 test_fraction=0.30,
             )
 
-            assert result["model_version"] == ML_MODEL_VERSION
+            assert result["model_version"].startswith(ML_MODEL_VERSION + "-")
             assert result["train_count"] >= 8
             assert result["test_count"] >= 4
             assert result["candidate_metrics"]["mean_brier_error"] >= 0
             assert result["baseline_metrics"]["mean_brier_error"] >= 0
             assert result["promotion_status"] in {"promoted", "candidate_only"}
 
-            candidate = tmp_path / ".models" / "ml-test.candidate.json"
-            assert candidate.exists()
+            rows = session.scalars(
+                select(ModelRegistry).where(
+                    ModelRegistry.business_id == business.id
+                )
+            ).all()
+            assert len(rows) == 1
+            assert rows[0].model_version == result["model_version"]
+            assert rows[0].artifact
 
-            status_after = active_model_status(business.id)
+            status_after = active_model_status(session, business.id)
             if result["promotion_status"] == "promoted":
                 assert status_after["active"] is True
-                assert status_after["model_version"] == ML_MODEL_VERSION
+                assert status_after["model_version"] == result["model_version"]
             else:
                 assert status_after["active"] is False
+        finally:
+            session.close()
+    finally:
+        db.engine, db.SessionLocal = old_engine, old_session
+
+
+def test_model_registry_supports_explicit_rollback():
+    old_engine, old_session = db.engine, db.SessionLocal
+    try:
+        db.engine = create_engine(
+            "sqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+        )
+        db.SessionLocal = sessionmaker(
+            bind=db.engine,
+            autoflush=False,
+            autocommit=False,
+        )
+        db.init_db()
+
+        session = db.SessionLocal()
+        try:
+            business = Business(id="rollback-test", name="Rollback Test")
+            session.add(business)
+            session.flush()
+
+            first = ModelRegistry(
+                business_id=business.id,
+                model_version="ml-v0.1-first",
+                status="superseded",
+                trained_at=datetime(2026, 9, 1),
+                train_count=20,
+                test_count=6,
+                metrics='{"candidate":{}}',
+                artifact='{"model_version":"ml-v0.1-first"}',
+                reason="Previous promoted model",
+            )
+            second = ModelRegistry(
+                business_id=business.id,
+                model_version="ml-v0.1-second",
+                status="active",
+                trained_at=datetime(2026, 9, 2),
+                train_count=22,
+                test_count=7,
+                metrics='{"candidate":{}}',
+                artifact='{"model_version":"ml-v0.1-second"}',
+                reason="Current promoted model",
+            )
+            session.add_all([first, second])
+            session.commit()
+
+            result = rollback_active_model(
+                session,
+                business.id,
+                target_version="ml-v0.1-first",
+            )
+
+            assert result["status"] == "rolled_back"
+            assert result["rolled_back_from"] == "ml-v0.1-second"
+            assert result["active_model_version"] == "ml-v0.1-first"
+
+            status = active_model_status(session, business.id)
+            assert status["active"] is True
+            assert status["model_version"] == "ml-v0.1-first"
+
+            states = {
+                row.model_version: row.status
+                for row in session.scalars(
+                    select(ModelRegistry).where(
+                        ModelRegistry.business_id == business.id
+                    )
+                )
+            }
+            assert states["ml-v0.1-second"] == "rolled_back"
+            assert states["ml-v0.1-first"] == "active"
         finally:
             session.close()
     finally:
