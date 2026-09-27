@@ -165,6 +165,64 @@ def list_evaluations(
         for prediction, evaluation, invoice, customer in rows
     ]
 
+@app.get("/risk/invoices")
+def risk_invoices(
+    business_id: str = Query(min_length=1),
+    threshold: float = Query(default=0.0, ge=0.0, le=1.0),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    rows = db.execute(
+        select(RiskPrediction, Invoice, Customer)
+        .join(Invoice, RiskPrediction.invoice_id == Invoice.id)
+        .join(Customer, Invoice.customer_id == Customer.id)
+        .where(Invoice.business_id == business_id)
+        .order_by(RiskPrediction.late_probability.desc(), RiskPrediction.cash_at_risk.desc())
+        .limit(limit)
+    ).all()
+    latest = {}
+    for prediction, invoice, customer in rows:
+        if prediction.late_probability >= threshold:
+            latest.setdefault(invoice.id, (prediction, invoice, customer))
+    return [
+        {
+            "invoice_id": invoice.id,
+            "invoice_number": invoice.invoice_number,
+            "customer": customer.name,
+            "amount": float(invoice.amount),
+            "due_date": invoice.due_date,
+            "late_probability": float(prediction.late_probability),
+            "expected_delay_days": float(prediction.expected_delay_days),
+            "expected_payment_date": prediction.expected_payment_date,
+            "cash_at_risk": float(prediction.cash_at_risk),
+            "risk_band": "HIGH" if float(prediction.late_probability) >= 0.70 else "MEDIUM" if float(prediction.late_probability) >= 0.40 else "LOW",
+            "reasons": json.loads(prediction.reasons),
+        }
+        for prediction, invoice, customer in latest.values()
+    ]
+
+@app.get("/risk/customers")
+def risk_customers(
+    business_id: str = Query(min_length=1),
+    db: Session = Depends(get_db),
+):
+    customers = db.scalars(
+        select(Customer)
+        .where(Customer.business_id == business_id)
+        .order_by(Customer.name)
+    ).all()
+    result = []
+    for customer in customers:
+        history = buyer_history(db, customer.id)
+        scored = score_buyer(history)
+        result.append({
+            "customer_id": customer.id,
+            "customer": customer.name,
+            **scored,
+            "outstanding_amount": history.current_outstanding_amount,
+        })
+    return sorted(result, key=lambda item: item["score"])
+
 @app.get("/dashboard")
 def dashboard(business_id: str = Query(min_length=1), db: Session = Depends(get_db)):
     invoices = db.scalars(select(Invoice).where(Invoice.business_id == business_id)).all()
