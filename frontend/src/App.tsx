@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, CustomerRisk, Dashboard, EvaluationSummary, InvoiceRisk } from "./api";
+import { analyzeAll, api, uploadInvoices, uploadPayments, CustomerRisk, Dashboard, EvaluationSummary, InvoiceRisk } from "./api";
 
 const DEFAULT_BUSINESS = "demo";
 const currency = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
@@ -15,6 +15,8 @@ export default function App() {
   const [evaluation, setEvaluation] = useState<EvaluationSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState("");
 
   async function load() {
     setLoading(true);
@@ -34,6 +36,39 @@ export default function App() {
       setError("Unable to load the API. Start FastAPI and check the business ID.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleUpload(event: React.ChangeEvent<HTMLInputElement>, kind: "invoice" | "payment") {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    setUploadMessage("");
+    try {
+      const result = kind === "invoice"
+        ? await uploadInvoices(businessId, file)
+        : await uploadPayments(businessId, file);
+      setUploadMessage((kind === "invoice" ? "Invoices" : "Payments") + ": " + JSON.stringify(result));
+      await load();
+    } catch {
+      setError("Upload failed. Check the file columns and API.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function runAnalysis() {
+    setUploading(true);
+    setUploadMessage("");
+    try {
+      const result = await analyzeAll(businessId);
+      setUploadMessage("Analyzed " + result.invoices_seen + " invoices; created " + result.predictions_created + " new predictions.");
+      await load();
+    } catch {
+      setError("Portfolio analysis failed. Import invoice and payment data first.");
+    } finally {
+      setUploading(false);
     }
   }
 
@@ -57,6 +92,27 @@ export default function App() {
         </div>
       </header>
       {error && <div className="error-banner">{error}</div>}
+      <section className="ingest-panel">
+        <div>
+          <p className="eyebrow">Portfolio onboarding</p>
+          <h2>Upload your invoice and payment exports</h2>
+          <p className="muted">CSV or XLSX. The files are normalized, matched, and scored for this business.</p>
+        </div>
+        <div className="upload-actions">
+          <label className="upload-button">
+            Invoices
+            <input type="file" accept=".csv,.xlsx" onChange={(e) => void handleUpload(e, "invoice")} disabled={uploading} />
+          </label>
+          <label className="upload-button">
+            Payments
+            <input type="file" accept=".csv,.xlsx" onChange={(e) => void handleUpload(e, "payment")} disabled={uploading} />
+          </label>
+          <button onClick={() => void runAnalysis()} disabled={uploading}>
+            {uploading ? "Analyzing…" : "Analyze portfolio"}
+          </button>
+        </div>
+        {uploadMessage && <p className="upload-message">{uploadMessage}</p>}
+      </section>
       <main>
         <section className="metric-grid">
           <Metric label="Receivables" value={dashboard ? currency.format(dashboard.outstanding_receivables) : "—"} />
