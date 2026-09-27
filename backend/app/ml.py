@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from math import exp, isfinite
+from math import exp
 from pathlib import Path
 
 from sklearn.linear_model import LogisticRegression, Ridge
@@ -382,21 +382,43 @@ def _load_active_model(business_id: str) -> dict | None:
 
 
 def active_model_status(business_id: str) -> dict:
-    artifact = _load_active_model(business_id)
-    if not artifact:
+    active = _load_active_model(business_id)
+    if active:
         return {
             "business_id": business_id,
-            "active": False,
-            "model_version": BASELINE_MODEL_VERSION,
+            "active": True,
+            "model_version": active["model_version"],
+            "trained_at": active["trained_at"],
+            "train_count": active["train_count"],
+            "test_count": active["test_count"],
+            "promotion_status": active["promotion_status"],
+            "metrics": active["metrics"],
         }
+
+    candidate_path = _artifact_path(business_id, candidate=True)
+    if candidate_path.exists():
+        try:
+            candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            candidate = None
+        if candidate:
+            return {
+                "business_id": business_id,
+                "active": False,
+                "model_version": BASELINE_MODEL_VERSION,
+                "candidate_model_version": candidate.get("model_version"),
+                "promotion_status": candidate.get("promotion_status", "candidate_only"),
+                "trained_at": candidate.get("trained_at"),
+                "train_count": candidate.get("train_count"),
+                "test_count": candidate.get("test_count"),
+                "metrics": candidate.get("metrics"),
+            }
+
     return {
         "business_id": business_id,
-        "active": True,
-        "model_version": artifact["model_version"],
-        "trained_at": artifact["trained_at"],
-        "train_count": artifact["train_count"],
-        "test_count": artifact["test_count"],
-        "metrics": artifact["metrics"],
+        "active": False,
+        "model_version": BASELINE_MODEL_VERSION,
+        "promotion_status": "baseline_only",
     }
 
 
