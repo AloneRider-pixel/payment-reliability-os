@@ -88,6 +88,8 @@ export type ModelStatus = {
   business_id: string;
   active: boolean;
   model_version: string;
+  candidate_model_version?: string;
+  promotion_status?: "promoted" | "candidate_only" | "baseline_only";
   trained_at?: string;
   train_count?: number;
   test_count?: number;
