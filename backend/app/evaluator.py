@@ -291,6 +291,9 @@ def backtest_business(
             "date_mae_days": None,
             "mean_brier_error": None,
             "late_classification_accuracy": None,
+            "observed_late_rate": None,
+            "mean_predicted_late_rate": None,
+            "mean_absolute_calibration_gap": None,
             "calibration_bins": [],
         }
 
@@ -328,5 +331,13 @@ def backtest_business(
         "late_classification_accuracy": round(correct / len(scored), 4),
         "observed_late_rate": round(sum(actuals) / len(actuals), 4),
         "mean_predicted_late_rate": round(sum(predictions) / len(predictions), 4),
+        "mean_absolute_calibration_gap": round(
+            sum(
+                abs(prediction - float(actual))
+                for prediction, actual in zip(predictions, actuals)
+            )
+            / len(predictions),
+            4,
+        ),
         "calibration_bins": _calibration_bins(predictions, actuals),
     }
