@@ -20,6 +20,7 @@ from backend.app.entities import (
 from backend.app.import_service import import_invoices, import_payments
 from backend.app.models import BuyerHistory, InvoiceInput
 from backend.app.repository import buyer_history, invoice_input
+from backend.app.ml import active_model_status, predict_invoice_risk_with_active_model, train_business_model
 from backend.app.scoring import MODEL_VERSION, predict_invoice_risk, score_buyer
 
 db.init_db()
@@ -188,7 +189,7 @@ def analyze_invoice(invoice_id: int, db: Session = Depends(get_db)):
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    result = predict_invoice_risk(payload)
+    result = predict_invoice_risk_with_active_model(db, invoice_id)
     prediction = RiskPrediction(
         invoice_id=invoice_id,
         predicted_at=_utc_now_naive(),
@@ -235,7 +236,7 @@ def analyze_all(
             skipped_recent += 1
             continue
 
-        result = predict_invoice_risk(invoice_input(db, invoice.id))
+        result = predict_invoice_risk_with_active_model(db, invoice.id)
         db.add(
             RiskPrediction(
                 invoice_id=invoice.id,
@@ -302,6 +303,29 @@ def evaluate_prediction_endpoint(
         return evaluate_prediction(db, prediction_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/models/train")
+def train_model(
+    business_id: str = Query(min_length=1),
+    min_history: int = Query(default=3, ge=0, le=100),
+    test_fraction: float = Query(default=0.30, ge=0.20, le=0.50),
+    db: Session = Depends(get_db),
+):
+    try:
+        return train_business_model(
+            db,
+            business_id,
+            min_history=min_history,
+            test_fraction=test_fraction,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/models/status")
+def model_status(business_id: str = Query(min_length=1)):
+    return active_model_status(business_id)
 
 
 @app.post("/evaluations/backtest")
