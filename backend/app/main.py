@@ -12,6 +12,7 @@ from backend.app.entities import Business, Customer, Invoice, RiskPrediction
 from backend.app.import_service import import_invoices, import_payments
 from backend.app.models import BuyerHistory, InvoiceInput
 from backend.app.repository import buyer_history, invoice_input
+from backend.app.evaluator import evaluate_prediction, evaluation_summary
 from backend.app.scoring import predict_invoice_risk, score_buyer
 
 init_db()
@@ -24,6 +25,8 @@ class BuyerScoreResponse(BaseModel):
     late_probability: float
     expected_delay_days: float
     reasons: list[str]
+    evidence_count: int
+    confidence: str
 
 class InvoiceRiskResponse(BaseModel):
     late_probability: float
@@ -118,6 +121,49 @@ def analyze_invoice(invoice_id: int, db: Session = Depends(get_db)):
 def list_predictions(business_id: str = Query(min_length=1), limit: int = Query(default=50, ge=1, le=200), db: Session = Depends(get_db)):
     rows = db.execute(select(RiskPrediction, Invoice, Customer).join(Invoice, RiskPrediction.invoice_id == Invoice.id).join(Customer, Invoice.customer_id == Customer.id).where(Invoice.business_id == business_id).order_by(RiskPrediction.predicted_at.desc()).limit(limit)).all()
     return [{"invoice_id": invoice.id, "invoice_number": invoice.invoice_number, "customer_id": customer.id, "customer": customer.name, "predicted_at": prediction.predicted_at, "late_probability": float(prediction.late_probability), "expected_delay_days": float(prediction.expected_delay_days), "expected_payment_date": prediction.expected_payment_date, "cash_at_risk": float(prediction.cash_at_risk), "model_version": prediction.model_version, "reasons": json.loads(prediction.reasons)} for prediction, invoice, customer in rows]
+
+@app.post("/predictions/{prediction_id}/evaluate")
+def evaluate_prediction_endpoint(prediction_id: int, db: Session = Depends(get_db)):
+    try:
+        return evaluate_prediction(db, prediction_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+@app.get("/evaluations/summary")
+def evaluation_summary_endpoint(business_id: str = Query(min_length=1), db: Session = Depends(get_db)):
+    return evaluation_summary(db, business_id)
+
+@app.get("/evaluations")
+def list_evaluations(
+    business_id: str = Query(min_length=1),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    rows = db.execute(
+        select(RiskPrediction, PredictionEvaluation, Invoice, Customer)
+        .join(PredictionEvaluation, PredictionEvaluation.prediction_id == RiskPrediction.id)
+        .join(Invoice, RiskPrediction.invoice_id == Invoice.id)
+        .join(Customer, Invoice.customer_id == Customer.id)
+        .where(Invoice.business_id == business_id)
+        .order_by(PredictionEvaluation.evaluated_at.desc())
+        .limit(limit)
+    ).all()
+    return [
+        {
+            "prediction_id": prediction.id,
+            "invoice_id": invoice.id,
+            "invoice_number": invoice.invoice_number,
+            "customer": customer.name,
+            "predicted_payment_date": prediction.expected_payment_date,
+            "actual_payment_date": evaluation.actual_payment_date,
+            "payment_date_error_days": evaluation.payment_date_error_days,
+            "predicted_late_probability": float(prediction.late_probability),
+            "actual_late": evaluation.actual_late,
+            "actual_delay_days": evaluation.actual_delay_days,
+            "model_version": prediction.model_version,
+        }
+        for prediction, evaluation, invoice, customer in rows
+    ]
 
 @app.get("/dashboard")
 def dashboard(business_id: str = Query(min_length=1), db: Session = Depends(get_db)):
