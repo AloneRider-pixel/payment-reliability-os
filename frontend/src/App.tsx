@@ -4,6 +4,7 @@ import type {
   BacktestResult,
   CustomerRisk,
   Dashboard,
+  CollectionAction,
   EvaluationSummary,
   InvoiceRisk,
   ModelDrift,
@@ -40,6 +41,7 @@ export default function App() {
   const [backtest, setBacktest] = useState<BacktestResult | null>(null);
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
   const [modelDrift, setModelDrift] = useState<ModelDrift | null>(null);
+  const [actions, setActions] = useState<CollectionAction[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -58,6 +60,7 @@ export default function App() {
         api.evaluations(businessId),
         api.modelStatus(businessId),
         api.latestModelDrift(businessId),
+        api.actions(businessId),
       ]);
       setDashboard(results[0]);
       setCustomers(results[1]);
@@ -65,6 +68,7 @@ export default function App() {
       setEvaluation(results[3]);
       setModelStatus(results[4]);
       setModelDrift(results[5]);
+      setActions(results[6]);
     } catch {
       setError("Unable to load the API. Start FastAPI and check the business ID.");
     } finally {
@@ -120,6 +124,39 @@ export default function App() {
       setError("Portfolio analysis failed. Import invoice and payment data first.");
     } finally {
       setUploading(false);
+    }
+  }
+
+  async function generateActionPlan() {
+    setBacktesting(true);
+    setError("");
+    setUploadMessage("");
+    try {
+      const result = await api.generateActions(businessId);
+      const next = await api.actions(businessId);
+      setActions(next);
+      setUploadMessage(
+        "Action plan updated: " +
+          result.actions_created +
+          " created, " +
+          result.actions_updated +
+          " refreshed.",
+      );
+    } catch {
+      setError("Action plan generation failed. Analyze outstanding invoices first.");
+    } finally {
+      setBacktesting(false);
+    }
+  }
+
+  async function completeAction(actionId: number) {
+    try {
+      await api.updateActionStatus(actionId, "completed");
+      setActions((current) =>
+        current.filter((action) => action.action_id !== actionId),
+      );
+    } catch {
+      setError("Unable to update the collection action.");
     }
   }
 
@@ -453,6 +490,9 @@ export default function App() {
                 <button onClick={() => void runRetrainCheck()} disabled={backtesting || loading}>
                   {backtesting ? "Checking…" : "Check drift & retrain"}
                 </button>
+                <button onClick={() => void generateActionPlan()} disabled={backtesting || loading}>
+                  {backtesting ? "Updating…" : "Generate action plan"}
+                </button>
                 <button onClick={() => void runBacktest()} disabled={backtesting || loading}>
                   {backtesting ? "Working…" : "Run historical backtest"}
                 </button>
@@ -558,34 +598,23 @@ export default function App() {
           <div className="panel">
             <div className="panel-header">
               <div>
-                <p className="eyebrow">Priority</p>
-                <h2>Highest-risk invoice</h2>
+                <p className="eyebrow">Receivables workflow</p>
+                <h2>Recommended next actions</h2>
               </div>
+              <span className="pill">{actions.length} open</span>
             </div>
-            {invoices[0] ? (
-              <div className="action-card">
-                <div className="action-score">
-                  <span
-                    className={
-                      "risk-dot " + riskTone(invoices[0].late_probability)
-                    }
-                  />
-                  {pct(invoices[0].late_probability)} late risk
-                </div>
-                <h3>{invoices[0].customer}</h3>
-                <p>
-                  {invoices[0].invoice_number} ·{" "}
-                  {currency.format(invoices[0].amount)}
-                </p>
-                <strong>{currency.format(invoices[0].cash_at_risk)} cash at risk</strong>
-                <p className="muted">
-                  {invoices[0].reasons[0] ??
-                    "Review the buyer payment history."}
-                </p>
-              </div>
-            ) : (
-              <Empty text="Analyze an invoice to create the first priority item." />
-            )}
+            <div className="action-list">
+              {actions.slice(0, 6).map((action) => (
+                <ActionRow
+                  key={action.action_id}
+                  action={action}
+                  onComplete={() => void completeAction(action.action_id)}
+                />
+              ))}
+              {!actions.length && (
+                <Empty text="Generate an action plan after scoring your outstanding invoices." />
+              )}
+            </div>
           </div>
         </section>
       </main>
@@ -675,4 +704,50 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 function Empty({ text }: { text: string }) {
   return <div className="empty">{text}</div>;
+}
+
+
+function ActionRow({
+  action,
+  onComplete,
+}: {
+  action: CollectionAction;
+  onComplete: () => void;
+}) {
+  const tone =
+    action.action_type === "ESCALATION_REVIEW" ||
+    action.action_type === "PRIORITY_COLLECTION"
+      ? "danger"
+      : action.action_type === "COLLECTION_FOLLOW_UP" ||
+          action.action_type === "PRE_DUE_PRIORITY"
+        ? "warning"
+        : "healthy";
+
+  const label = action.action_type
+    .replaceAll("_", " ")
+    .toLowerCase()
+    .replace(/^./, (value) => value.toUpperCase());
+
+  return (
+    <div className="action-row">
+      <div className="action-row-main">
+        <div className="action-row-top">
+          <span className={"risk-dot " + tone} />
+          <strong>{label}</strong>
+          <span className="action-priority">{Math.round(action.priority_score)} priority</span>
+        </div>
+        <h3>{action.customer}</h3>
+        <span>
+          {action.invoice_number} · {currency.format(action.amount)} outstanding ·{" "}
+          {action.days_overdue > 0
+            ? action.days_overdue + "d overdue"
+            : "due " + action.due_date}
+        </span>
+        <p className="muted">{action.reason}</p>
+      </div>
+      <button className="action-complete" onClick={onComplete}>
+        Complete
+      </button>
+    </div>
+  );
 }
