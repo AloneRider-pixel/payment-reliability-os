@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 import json
 
@@ -28,7 +28,7 @@ class BuyerScoreResponse(BaseModel):
 class InvoiceRiskResponse(BaseModel):
     late_probability: float
     expected_delay_days: float
-    expected_payment_date: datetime
+    expected_payment_date: date
     cash_at_risk: float
     reasons: list[str]
 
