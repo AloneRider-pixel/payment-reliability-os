@@ -87,6 +87,7 @@ Key endpoints:
 - `GET /actions` — retrieve the open/completed/dismissed action queue
 - `GET /actions/summary` — summarize open collection workload and exposure
 - `POST /actions/{action_id}/status` — mark a recommended action open, completed, or dismissed
+- `GET /jobs/runs` — show the latest scheduled-operation audit history
 - `POST /score/buyer` — score supplied buyer history without persistence
 
 ## ML model lifecycle
@@ -113,6 +114,22 @@ The default operating policy recommends retraining when the aggregate drift scor
 
 `POST /models/retrain-if-needed` records a drift snapshot and triggers the existing temporal training pipeline only when the policy recommends retraining. The candidate still must pass the baseline promotion gate before becoming active.
 
+
+
+### Scheduled operations
+
+The repository includes a daily operations runner at `scripts/run_scheduled_jobs.py`. Its four stages run in dependency order:
+
+1. Evaluate pending predictions against newly settled invoices.
+2. Check model drift and run the existing temporal training/promotion pipeline when needed.
+3. Refresh outstanding invoice risk predictions using the currently active model.
+4. Refresh the receivables action queue.
+
+Each business/job/date combination is protected by a unique database slot in `scheduled_job_runs`, so repeated invocations of the same daily slot are idempotent. The audit record stores start/end timestamps, completion state, and structured output.
+
+GitHub Actions runs this workflow every day at 02:00 UTC (07:30 IST). Set the repository `DATABASE_URL` secret to the persistent application database before enabling scheduled production execution. The workflow also supports manual dispatch for one business or the full portfolio.
+
+Scheduled execution does not automatically send collection messages or alter commercial terms; it refreshes predictions, model lifecycle state, and human-reviewable action recommendations.
 
 ### Receivables action engine
 
