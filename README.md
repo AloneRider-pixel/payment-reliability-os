@@ -17,6 +17,7 @@ Upload invoice and payment history, then get:
 - Leakage-safe historical backtesting
 - A temporally trained ML candidate for late-risk and payment-delay prediction
 - Persistent model registry with promotion history and rollback
+- Leakage-safe model drift monitoring and retraining triggers
 
 The score is an **operational payment-behavior index**, not a regulated credit rating and not a standalone lending or underwriting decision.
 
@@ -77,6 +78,10 @@ Key endpoints:
 - `GET /evaluations/summary` — prediction quality metrics from stored predictions
 - `POST /models/train` — train a temporal ML candidate and compare it with the baseline
 - `GET /models/status` — show whether a promoted ML model is active
+- `GET /models/drift` — measure recent feature drift against the active model's training distribution
+- `GET /models/drift/latest` — retrieve the latest persisted drift snapshot
+- `POST /models/retrain-if-needed` — measure drift and train a candidate only when the retraining policy is triggered
+- `POST /models/rollback` — restore the previous promoted ML model
 - `POST /score/buyer` — score supplied buyer history without persistence
 
 ## ML model lifecycle
@@ -94,6 +99,14 @@ The candidate contains:
 - A promotion gate requiring the candidate to match or improve the baseline on both Brier error and payment-date MAE
 
 When the gate is not met, the baseline remains active. When an ML model is active, live invoice analysis uses it automatically. Model artifacts, metrics, lineage, and lifecycle state are stored in the `model_registry` database table, so deployments do not depend on local filesystem state. Previous promoted versions are retained for rollback.
+
+### Drift monitoring
+
+The active model's training feature means and scales are used as the reference distribution. A recent cohort of settled invoices is reconstructed with the same leakage-safe historical feature cutoff. The service reports a mean standardized feature shift and the maximum individual feature shift.
+
+The default operating policy recommends retraining when the aggregate drift score reaches `0.75` or any feature reaches `1.50σ`, provided the recent cohort has at least 12 eligible samples. These are operational thresholds for the prototype, not statistical significance tests.
+
+`POST /models/retrain-if-needed` records a drift snapshot and triggers the existing temporal training pipeline only when the policy recommends retraining. The candidate still must pass the baseline promotion gate before becoming active.
 
 ## Validation discipline
 
