@@ -104,6 +104,24 @@ export type ModelStatus = {
   }>;
 };
 
+export type ModelDrift = {
+  business_id: string;
+  model_version: string;
+  measured_at: string;
+  sample_count: number;
+  drift_score: number | null;
+  max_feature_shift: number | null;
+  status: "stable" | "retrain_recommended" | "insufficient_data" | "no_active_model";
+  recommendation: "monitor" | "retrain" | "initial_train";
+  features: Array<{
+    name: string;
+    training_mean: number;
+    training_scale: number;
+    recent_mean: number;
+    standardized_mean_shift: number;
+  }>;
+};
+
 export type BacktestResult = {
   business_id: string;
   model_version: string;
@@ -153,6 +171,27 @@ export const api = {
   modelStatus: (businessId: string) =>
     getJson<ModelStatus>(
       "/models/status?business_id=" + encodeURIComponent(businessId),
+    ),
+  modelDrift: (businessId: string, recentWindow = 30) =>
+    getJson<ModelDrift>(
+      "/models/drift?business_id=" +
+        encodeURIComponent(businessId) +
+        "&recent_window=" +
+        recentWindow,
+    ),
+  latestModelDrift: (businessId: string) =>
+    getJson<ModelDrift | null>(
+      "/models/drift/latest?business_id=" + encodeURIComponent(businessId),
+    ),
+  retrainIfNeeded: (businessId: string) =>
+    postJson<{
+      business_id: string;
+      retrained: boolean;
+      reason: string;
+      drift: ModelDrift;
+      training?: Awaited<ReturnType<typeof api.trainModel>>;
+    }>(
+      "/models/retrain-if-needed?business_id=" + encodeURIComponent(businessId),
     ),
   rollbackModel: (businessId: string, targetVersion?: string) =>
     postJson<{ 
