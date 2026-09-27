@@ -22,7 +22,10 @@ from backend.app.models import BuyerHistory, InvoiceInput
 from backend.app.repository import buyer_history, invoice_input
 from backend.app.ml import (
     active_model_status,
+    assess_model_drift,
+    latest_model_drift,
     predict_invoice_risk_with_active_model,
+    retrain_if_needed,
     rollback_active_model,
     train_business_model,
 )
@@ -331,6 +334,54 @@ def train_model(
 @app.get("/models/status")
 def model_status(business_id: str = Query(min_length=1), db: Session = Depends(get_db)):
     return active_model_status(db, business_id)
+
+
+@app.get("/models/drift")
+def model_drift(
+    business_id: str = Query(min_length=1),
+    recent_window: int = Query(default=30, ge=1, le=200),
+    min_history: int = Query(default=3, ge=0, le=100),
+    min_samples: int = Query(default=12, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    try:
+        return assess_model_drift(
+            db,
+            business_id,
+            recent_window=recent_window,
+            min_history=min_history,
+            min_samples=min_samples,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/models/drift/latest")
+def latest_model_drift_endpoint(
+    business_id: str = Query(min_length=1),
+    db: Session = Depends(get_db),
+):
+    return latest_model_drift(db, business_id)
+
+
+@app.post("/models/retrain-if-needed")
+def retrain_model_if_needed(
+    business_id: str = Query(min_length=1),
+    recent_window: int = Query(default=30, ge=1, le=200),
+    min_history: int = Query(default=3, ge=0, le=100),
+    min_samples: int = Query(default=12, ge=1, le=200),
+    db: Session = Depends(get_db),
+):
+    try:
+        return retrain_if_needed(
+            db,
+            business_id,
+            recent_window=recent_window,
+            min_history=min_history,
+            min_samples=min_samples,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.post("/evaluations/backtest")
