@@ -10,10 +10,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install
+
+      - name: Install backend dependencies
         run: pip install -r backend/requirements.txt
-      - name: Test
+
+      - name: Backend tests
         run: pytest -q
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Frontend install
+        working-directory: frontend
+        run: npm install
+
+      - name: Frontend build
+        working-directory: frontend
+        run: npm run build
