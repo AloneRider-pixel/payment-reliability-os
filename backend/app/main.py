@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.app.db import SessionLocal, init_db
+from backend.app import db
 from backend.app.evaluator import evaluate_prediction, evaluation_summary
 from backend.app.entities import (
     Business,
@@ -22,7 +22,7 @@ from backend.app.models import BuyerHistory, InvoiceInput
 from backend.app.repository import buyer_history, invoice_input
 from backend.app.scoring import MODEL_VERSION, predict_invoice_risk, score_buyer
 
-init_db()
+db.init_db()
 
 app = FastAPI(
     title="Payment Reliability OS",
@@ -75,7 +75,7 @@ class BusinessCreate(BaseModel):
 
 
 def get_db():
-    session = SessionLocal()
+    session = db.SessionLocal()
     try:
         yield session
     finally:
