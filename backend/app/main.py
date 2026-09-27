@@ -10,6 +10,12 @@ from sqlalchemy.orm import Session
 
 from backend.app import db
 from backend.app.evaluator import backtest_business, evaluate_prediction, evaluation_summary
+from backend.app.actions import (
+    action_summary,
+    generate_collection_actions,
+    list_collection_actions,
+    update_collection_action_status,
+)
 from backend.app.entities import (
     Business,
     Customer,
@@ -81,6 +87,10 @@ class InvoiceRiskResponse(BaseModel):
 class BusinessCreate(BaseModel):
     id: str
     name: str
+
+
+class ActionStatusUpdate(BaseModel):
+    status: str
 
 
 def get_db():
@@ -267,6 +277,54 @@ def analyze_all(
         "settled_skipped": skipped_settled,
         "recent_predictions_skipped": skipped_recent,
     }
+
+
+@app.post("/actions/generate")
+def generate_actions(
+    business_id: str = Query(min_length=1),
+    as_of: date | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    try:
+        return generate_collection_actions(db, business_id, as_of=as_of)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/actions")
+def collection_actions(
+    business_id: str = Query(min_length=1),
+    status: str = Query(default="open"),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+):
+    if status not in {"open", "completed", "dismissed"}:
+        raise HTTPException(status_code=422, detail="unsupported action status")
+    return list_collection_actions(db, business_id, status=status, limit=limit)
+
+
+@app.get("/actions/summary")
+def collection_action_summary(
+    business_id: str = Query(min_length=1),
+    db: Session = Depends(get_db),
+):
+    return action_summary(db, business_id)
+
+
+@app.post("/actions/{action_id}/status")
+def collection_action_status(
+    action_id: int,
+    payload: ActionStatusUpdate,
+    db: Session = Depends(get_db),
+):
+    try:
+        return update_collection_action_status(
+            db,
+            action_id,
+            payload.status.strip().lower(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/predictions")
