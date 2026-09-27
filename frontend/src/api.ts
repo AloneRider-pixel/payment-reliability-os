@@ -67,6 +67,29 @@ export type EvaluationSummary = {
   late_classification_accuracy: number | null;
 };
 
+export type BacktestResult = {
+  business_id: string;
+  model_version: string;
+  min_history: number;
+  invoices_seen: number;
+  backtested_invoices: number;
+  skipped_cold_start: number;
+  date_mae_days: number | null;
+  mean_brier_error: number | null;
+  late_classification_accuracy: number | null;
+  observed_late_rate: number | null;
+  mean_predicted_late_rate: number | null;
+  mean_absolute_calibration_gap: number | null;
+  calibration_bins: Array<{
+    lower_bound: number;
+    upper_bound: number;
+    count: number;
+    mean_predicted_late_rate: number;
+    observed_late_rate: number;
+    absolute_calibration_gap: number;
+  }>;
+};
+
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
 
 async function getJson<T>(path: string): Promise<T> {
@@ -90,7 +113,20 @@ export const api = {
     getJson<EvaluationSummary>(
       "/evaluations/summary?business_id=" + encodeURIComponent(businessId),
     ),
+  backtest: (businessId: string, minHistory = 3) =>
+    postJson<BacktestResult>(
+      "/evaluations/backtest?business_id=" +
+        encodeURIComponent(businessId) +
+        "&min_history=" +
+        minHistory,
+    ),
 };
+
+async function postJson<T>(path: string): Promise<T> {
+  const response = await fetch(API_BASE + path, { method: "POST" });
+  if (!response.ok) throw new Error("API " + response.status);
+  return response.json() as Promise<T>;
+}
 
 async function uploadFile(path: string, businessId: string, file: File) {
   const form = new FormData();
