@@ -20,14 +20,19 @@ from backend.app.entities import (
 from backend.app.import_service import import_invoices, import_payments
 from backend.app.models import BuyerHistory, InvoiceInput
 from backend.app.repository import buyer_history, invoice_input
-from backend.app.ml import active_model_status, predict_invoice_risk_with_active_model, train_business_model
+from backend.app.ml import (
+    active_model_status,
+    predict_invoice_risk_with_active_model,
+    rollback_active_model,
+    train_business_model,
+)
 from backend.app.scoring import MODEL_VERSION, predict_invoice_risk, score_buyer
 
 db.init_db()
 
 app = FastAPI(
     title="Payment Reliability OS",
-    version="0.5.0",
+    version="0.6.0",
     description="Explainable B2B payment-behavior intelligence.",
 )
 
@@ -197,7 +202,7 @@ def analyze_invoice(invoice_id: int, db: Session = Depends(get_db)):
         expected_delay_days=result["expected_delay_days"],
         expected_payment_date=result["expected_payment_date"],
         cash_at_risk=Decimal(str(result["cash_at_risk"])),
-        model_version=MODEL_VERSION,
+        model_version=result["model_version"],
         reasons=json.dumps(result["reasons"]),
     )
     db.add(prediction)
@@ -245,7 +250,7 @@ def analyze_all(
                 expected_delay_days=result["expected_delay_days"],
                 expected_payment_date=result["expected_payment_date"],
                 cash_at_risk=Decimal(str(result["cash_at_risk"])),
-                model_version=MODEL_VERSION,
+                model_version=result["model_version"],
                 reasons=json.dumps(result["reasons"]),
             )
         )
@@ -324,8 +329,8 @@ def train_model(
 
 
 @app.get("/models/status")
-def model_status(business_id: str = Query(min_length=1)):
-    return active_model_status(business_id)
+def model_status(business_id: str = Query(min_length=1), db: Session = Depends(get_db)):
+    return active_model_status(db, business_id)
 
 
 @app.post("/evaluations/backtest")
@@ -338,6 +343,18 @@ def historical_backtest(
         return backtest_business(db, business_id, min_history=min_history)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/models/rollback")
+def rollback_model(
+    business_id: str = Query(min_length=1),
+    target_version: str | None = Query(default=None, min_length=1),
+    db: Session = Depends(get_db),
+):
+    try:
+        return rollback_active_model(db, business_id, target_version=target_version)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.get("/evaluations/summary")
