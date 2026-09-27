@@ -122,6 +122,19 @@ export type ModelDrift = {
   }>;
 };
 
+export type RetrainResult = {
+  business_id: string;
+  retrained: boolean;
+  reason: string;
+  drift: ModelDrift;
+  training?: {
+    promotion_status: "promoted" | "candidate_only";
+    model_version: string;
+    train_count: number;
+    test_count: number;
+  };
+};
+
 export type BacktestResult = {
   business_id: string;
   model_version: string;
@@ -184,13 +197,7 @@ export const api = {
       "/models/drift/latest?business_id=" + encodeURIComponent(businessId),
     ),
   retrainIfNeeded: (businessId: string) =>
-    postJson<{
-      business_id: string;
-      retrained: boolean;
-      reason: string;
-      drift: ModelDrift;
-      training?: Awaited<ReturnType<typeof api.trainModel>>;
-    }>(
+    postJson<RetrainResult>(
       "/models/retrain-if-needed?business_id=" + encodeURIComponent(businessId),
     ),
   rollbackModel: (businessId: string, targetVersion?: string) =>
