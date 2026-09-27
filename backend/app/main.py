@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app import db
-from backend.app.evaluator import evaluate_prediction, evaluation_summary
+from backend.app.evaluator import backtest_business, evaluate_prediction, evaluation_summary
 from backend.app.entities import (
     Business,
     Customer,
@@ -302,6 +302,18 @@ def evaluate_prediction_endpoint(
         return evaluate_prediction(db, prediction_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/evaluations/backtest")
+def historical_backtest(
+    business_id: str = Query(min_length=1),
+    min_history: int = Query(default=3, ge=0, le=100),
+    db: Session = Depends(get_db),
+):
+    try:
+        return backtest_business(db, business_id, min_history=min_history)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/evaluations/summary")
