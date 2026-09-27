@@ -14,7 +14,8 @@ Upload invoice and payment history, then get:
 - Explainable score factors and underlying behavior features
 - Confidence level and evidence count
 - Prediction-vs-actual evaluation metrics
-- Leakage-safe historical backtest with calibration buckets
+- Leakage-safe historical backtesting
+- A temporally trained ML candidate for late-risk and payment-delay prediction
 
 The score is an **operational payment-behavior index**, not a regulated credit rating and not a standalone lending or underwriting decision.
 
@@ -39,28 +40,27 @@ Feature engine
   - invoice-size baseline
   - outstanding exposure
         |
-        v
-Explainable scoring baseline
-        |
-        +--> Buyer score + factor contributions
-        +--> Invoice late-payment risk
-        +--> Expected payment date
-        +--> Cash at risk
-        |
-        v
-Historical backtest
-  - chronological holdout
-  - date MAE
-  - Brier error
-  - classification accuracy
-  - observed vs predicted late rate
-  - calibration buckets
-        |
-        v
-Actual payment outcome
-        |
-        v
-Prediction-vs-actual evaluation
+        +-----------------------------+
+        |                             |
+        v                             v
+Explainable baseline            Temporal ML candidate
+        |                       - LogisticRegression
+        |                       - Ridge delay model
+        |                       - temporal train/test split
+        |                       - baseline promotion gate
+        |                             |
+        +-------------+---------------+
+                      v
+               Invoice risk
+                      |
+                      v
+                Cash at risk
+                      |
+                      v
+            Actual payment outcome
+                      |
+                      v
+              Model evaluation
 ```
 
 ## API
@@ -74,7 +74,33 @@ Key endpoints:
 - `GET /risk/invoices` — latest invoice risk queue
 - `POST /evaluations/backtest` — chronological historical validation using only prior settled behavior
 - `GET /evaluations/summary` — prediction quality metrics from stored predictions
-- `POST /score/buyer` — score a supplied buyer history without persistence
+- `POST /models/train` — train a temporal ML candidate and compare it with the baseline
+- `GET /models/status` — show whether a promoted ML model is active
+- `POST /score/buyer` — score supplied buyer history without persistence
+
+## ML model lifecycle
+
+Model version: `ml-v0.1`.
+
+Training uses chronological samples. For each historical invoice, the feature history is cut off at that invoice's issue date, preventing future payment outcomes from entering the training features.
+
+The candidate contains:
+
+- Logistic regression for late-payment probability
+- Ridge regression for expected positive payment delay
+- StandardScaler parameters and model coefficients stored as JSON artifacts
+- Temporal train/test metrics
+- A promotion gate requiring the candidate to match or improve the baseline on both Brier error and payment-date MAE
+
+When the gate is not met, the baseline remains active. When an ML model is active, live invoice analysis uses it automatically. Runtime artifacts are stored under `.models/` and are intentionally excluded from Git.
+
+## Validation discipline
+
+Historical backtests are chronological. A settled invoice is scored only when it has at least the configured number of settled invoices before its issue date; future invoices and future payment outcomes are excluded from the feature history.
+
+Backtests do not create prediction rows or evaluation records.
+
+Treat model metrics as measurements of the supplied historical dataset, not universal accuracy claims. More data is required before using ML performance as a generalized business claim.
 
 ## Local development
 
@@ -96,20 +122,6 @@ cd frontend
 npm install
 npm run dev
 ```
-
-## Scoring baseline
-
-Model version: `baseline-v1.0`.
-
-The score is composed from explicit, inspectable contributions for late-payment rate, average delay, payment consistency, and recent trend. Cold-start buyers receive a neutral score with `N/A` grade and LOW confidence rather than a fabricated history.
-
-The probability and score serve different purposes: the score summarizes operational reliability, while late-payment probability estimates the chance that a future invoice will be late. Neither should be represented as a regulated credit rating.
-
-## Validation discipline
-
-Historical backtests are chronological. A settled invoice is scored only when it has at least the configured number of settled invoices before its issue date; future invoices and future payment outcomes are excluded from the feature history. Backtests do not create prediction rows or evaluation records.
-
-Treat model metrics as measurements of the supplied historical dataset, not universal accuracy claims.
 
 ## Evidence policy
 
