@@ -129,3 +129,23 @@ class CollectionAction(Base):
             name="uq_collection_action_prediction",
         ),
     )
+
+
+class ScheduledJobRun(Base):
+    __tablename__ = "scheduled_job_runs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), index=True)
+    job_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    result: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    __table_args__ = (
+        UniqueConstraint(
+            "business_id",
+            "job_type",
+            "scheduled_for",
+            name="uq_scheduled_job_business_slot",
+        ),
+    )
