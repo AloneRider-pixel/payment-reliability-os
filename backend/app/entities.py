@@ -100,3 +100,32 @@ class ModelDriftSnapshot(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     recommendation: Mapped[str] = mapped_column(String(32), nullable=False)
     details: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class CollectionAction(Base):
+    __tablename__ = "collection_actions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), index=True)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("invoices.id"), index=True)
+    prediction_id: Mapped[int | None] = mapped_column(
+        ForeignKey("risk_predictions.id"),
+        nullable=True,
+        index=True,
+    )
+    model_version: Mapped[str] = mapped_column(String(128), nullable=False)
+    action_type: Mapped[str] = mapped_column(String(48), nullable=False)
+    priority_score: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="open")
+    due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    days_overdue: Mapped[int] = mapped_column(Integer, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    __table_args__ = (
+        UniqueConstraint(
+            "invoice_id",
+            "prediction_id",
+            name="uq_collection_action_prediction",
+        ),
+    )
