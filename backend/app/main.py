@@ -41,7 +41,7 @@ db.init_db()
 
 app = FastAPI(
     title="Payment Reliability OS",
-    version="0.6.0",
+    version="0.7.0",
     description="Explainable B2B payment-behavior intelligence.",
 )
 
