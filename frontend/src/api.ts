@@ -108,6 +108,7 @@ export type CollectionAction = {
   action_id: number;
   invoice_id: number;
   invoice_number: string;
+  customer: string;
   action_type:
     | "MONITOR"
     | "PRE_DUE_REMINDER"
