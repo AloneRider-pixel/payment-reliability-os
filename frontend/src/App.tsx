@@ -9,6 +9,7 @@ import type {
   InvoiceRisk,
   ModelDrift,
   ModelStatus,
+  ScheduledJobRun,
 } from "./api";
 import { analyzeAll, api, uploadInvoices, uploadPayments } from "./api";
 
@@ -42,6 +43,7 @@ export default function App() {
   const [modelStatus, setModelStatus] = useState<ModelStatus | null>(null);
   const [modelDrift, setModelDrift] = useState<ModelDrift | null>(null);
   const [actions, setActions] = useState<CollectionAction[]>([]);
+  const [scheduledRuns, setScheduledRuns] = useState<ScheduledJobRun[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -61,6 +63,7 @@ export default function App() {
         api.modelStatus(businessId),
         api.latestModelDrift(businessId),
         api.actions(businessId),
+        api.scheduledRuns(businessId),
       ]);
       setDashboard(results[0]);
       setCustomers(results[1]);
@@ -69,6 +72,7 @@ export default function App() {
       setModelStatus(results[4]);
       setModelDrift(results[5]);
       setActions(results[6]);
+      setScheduledRuns(results[7]);
     } catch {
       setError("Unable to load the API. Start FastAPI and check the business ID.");
     } finally {
@@ -538,6 +542,21 @@ export default function App() {
                 <div>
                   <strong>Baseline</strong>
                   <span> Brier {modelStatus.metrics.baseline.mean_brier_error.toFixed(4)} · Date MAE {modelStatus.metrics.baseline.date_mae_days.toFixed(1)}d</span>
+                </div>
+              </div>
+            )}
+            {scheduledRuns[0] && (
+              <div className="schedule-summary">
+                <div>
+                  <strong>Scheduled operations</strong>
+                  <span>
+                    {scheduledRuns[0].job_type.replaceAll("_", " ")} ·{" "}
+                    {scheduledRuns[0].status}
+                  </span>
+                </div>
+                <div>
+                  <strong>{scheduledRuns.filter((run) => run.status === "completed").length}/4</strong>
+                  <span>latest daily jobs complete</span>
                 </div>
               </div>
             )}
