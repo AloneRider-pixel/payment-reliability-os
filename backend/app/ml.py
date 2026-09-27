@@ -2,20 +2,19 @@ import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from math import exp
-from pathlib import Path
 
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.preprocessing import StandardScaler
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from backend.app.entities import Invoice
+from backend.app.entities import Invoice, ModelRegistry
 from backend.app.evaluator import _history_before_invoice
 from backend.app.models import BuyerHistory, InvoiceInput
 from backend.app.scoring import MODEL_VERSION as BASELINE_MODEL_VERSION
 from backend.app.scoring import predict_invoice_risk
 
-ML_MODEL_VERSION = "ml-v0.1"
+MODEL_FAMILY_VERSION = "ml-v0.1"
 FEATURE_NAMES = [
     "on_time_rate",
     "late_payment_rate",
@@ -30,76 +29,30 @@ FEATURE_NAMES = [
 ]
 
 
-def _artifact_dir() -> Path:
-    configured = Path.cwd() / ".models"
-    configured.mkdir(parents=True, exist_ok=True)
-    return configured
-
-
-def _artifact_path(business_id: str, candidate: bool = False) -> Path:
-    safe_id = "".join(char if char.isalnum() or char in "-_" else "_" for char in business_id)
-    suffix = ".candidate.json" if candidate else ".json"
-    return _artifact_dir() / f"{safe_id}{suffix}"
-
-
 def _feature_vector(history: BuyerHistory, amount: float) -> list[float]:
-    features = history.model_dump()
-    avg_invoice = float(features["average_invoice_amount"])
+    delays = [float(value) for value in history.payment_delays_days]
+    recent = [float(value) for value in (history.recent_delays_days or delays[-5:])]
+    avg_invoice = float(history.average_invoice_amount)
     amount_ratio = amount / avg_invoice if avg_invoice > 0 else 1.0
     outstanding_ratio = (
-        float(features["current_outstanding_amount"]) / avg_invoice
+        float(history.current_outstanding_amount) / avg_invoice
         if avg_invoice > 0
         else 0.0
     )
+    median_delay = sorted(delays)[len(delays) // 2] if delays else 0.0
+
     return [
-        float(features["payment_delays_days"] and (
-            sum(delay <= 0 for delay in features["payment_delays_days"])
-            / len(features["payment_delays_days"])
-        ) or 0.0),
-        float(
-            features["late_invoice_count"] / max(features["invoice_count"], 1)
-        ),
-        float(
-            sum(features["payment_delays_days"])
-            / max(len(features["payment_delays_days"]), 1)
-        ),
-        float(
-            sorted(features["payment_delays_days"])[
-                len(features["payment_delays_days"]) // 2
-            ]
-            if features["payment_delays_days"]
-            else 0.0
-        ),
-        float(_p90(features["payment_delays_days"])),
-        float(
-            sum(features["recent_delays_days"])
-            / max(len(features["recent_delays_days"]), 1)
-            if features["recent_delays_days"]
-            else 0.0
-        ),
-        float(
-            (
-                sum(features["recent_delays_days"])
-                / max(len(features["recent_delays_days"]), 1)
-            )
-            - (
-                sum(features["payment_delays_days"])
-                / max(len(features["payment_delays_days"]), 1)
-            )
-        ),
-        float(
-            max(
-                0.0,
-                1.0
-                - _clamp(
-                    _pstdev(features["payment_delays_days"]) / 15.0,
-                    0.0,
-                    1.0,
-                ),
-            )
-        ),
-        float(amount_ratio),
-        float(outstanding_ratio),
+        sum(delay <= 0 for delay in delays) / len(delays) if delays else 0.0,
+        history.late_invoice_count / max(history.invoice_count, 1),
+        sum(delays) / len(delays) if delays else 0.0,
+        median_delay,
+        _p90(delays),
+        sum(recent) / len(recent) if recent else 0.0,
+        (sum(recent) / len(recent) if recent else 0.0)
+        - (sum(delays) / len(delays) if delays else 0.0),
+        max(0.0, 1.0 - _clamp(_pstdev(delays) / 15.0, 0.0, 1.0)),
+        amount_ratio,
+        outstanding_ratio,
     ]
 
 
@@ -117,7 +70,7 @@ def _pstdev(values: list[float]) -> float:
 def _p90(values: list[float]) -> float:
     if not values:
         return 0.0
-    ordered = sorted(float(value) for value in values)
+    ordered = sorted(values)
     rank = 0.90 * (len(ordered) - 1)
     lower = int(rank)
     upper = min(lower + 1, len(ordered) - 1)
@@ -126,7 +79,10 @@ def _p90(values: list[float]) -> float:
 
 
 def _settled(invoice: Invoice) -> bool:
-    return sum((payment.amount for payment in invoice.payments), Decimal("0")) >= invoice.amount
+    return (
+        sum((payment.amount for payment in invoice.payments), Decimal("0"))
+        >= invoice.amount
+    )
 
 
 def _collect_samples(
@@ -160,8 +116,11 @@ def _collect_samples(
             skipped_cold_start += 1
             continue
 
-        actual_payment_date = max(payment.payment_date for payment in invoice.payments)
+        actual_payment_date = max(
+            payment.payment_date for payment in invoice.payments
+        )
         actual_delay_days = (actual_payment_date - invoice.due_date).days
+
         samples.append(
             {
                 "invoice": invoice,
@@ -185,18 +144,24 @@ def _binary_metrics(
         (prediction - float(actual)) ** 2
         for prediction, actual in zip(late_probabilities, actual_late)
     ) / len(late_probabilities)
+
     date_mae = sum(
         abs(float(delay) - predicted)
         for delay, predicted in zip(delays, predicted_delays)
     ) / len(delays)
+
     correct = sum(
         (prediction >= 0.5) == actual
         for prediction, actual in zip(late_probabilities, actual_late)
     )
+
     return {
         "date_mae_days": round(date_mae, 2),
         "mean_brier_error": round(brier, 6),
-        "late_classification_accuracy": round(correct / len(late_probabilities), 4),
+        "late_classification_accuracy": round(
+            correct / len(late_probabilities),
+            4,
+        ),
     }
 
 
@@ -207,32 +172,9 @@ def _better_than_baseline(candidate: dict, baseline: dict) -> bool:
     )
 
 
-def _serialize_model(
-    business_id: str,
-    scaler: StandardScaler,
-    classifier: LogisticRegression,
-    regressor: Ridge,
-    metrics: dict,
-    train_count: int,
-    test_count: int,
-    promotion_status: str,
-) -> dict:
-    return {
-        "business_id": business_id,
-        "model_version": ML_MODEL_VERSION,
-        "trained_at": datetime.now(timezone.utc).isoformat(),
-        "feature_names": FEATURE_NAMES,
-        "scaler_mean": scaler.mean_.tolist(),
-        "scaler_scale": scaler.scale_.tolist(),
-        "classifier_coefficients": classifier.coef_[0].tolist(),
-        "classifier_intercept": float(classifier.intercept_[0]),
-        "regressor_coefficients": regressor.coef_.tolist(),
-        "regressor_intercept": float(regressor.intercept_),
-        "train_count": train_count,
-        "test_count": test_count,
-        "promotion_status": promotion_status,
-        "metrics": metrics,
-    }
+def _new_model_version() -> tuple[str, datetime]:
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    return f"{MODEL_FAMILY_VERSION}-{now.strftime('%Y%m%d%H%M%S%f')}Z", now
 
 
 def train_business_model(
@@ -247,7 +189,9 @@ def train_business_model(
         raise ValueError("test_fraction must be between 0.20 and 0.50")
 
     samples, skipped_cold_start = _collect_samples(
-        session, business_id, min_history
+        session,
+        business_id,
+        min_history,
     )
     if len(samples) < 12:
         raise ValueError(
@@ -261,11 +205,17 @@ def train_business_model(
 
     y_train = [sample["actual_late"] for sample in train_samples]
     if len(set(y_train)) < 2:
-        raise ValueError("Training window must contain both late and on-time outcomes")
+        raise ValueError(
+            "Training window must contain both late and on-time outcomes"
+        )
 
     scaler = StandardScaler()
-    x_train = scaler.fit_transform([sample["features"] for sample in train_samples])
-    x_test = scaler.transform([sample["features"] for sample in test_samples])
+    x_train = scaler.fit_transform(
+        [sample["features"] for sample in train_samples]
+    )
+    x_test = scaler.transform(
+        [sample["features"] for sample in test_samples]
+    )
 
     classifier = LogisticRegression(
         max_iter=1000,
@@ -277,7 +227,10 @@ def train_business_model(
     regressor = Ridge(alpha=10.0)
     regressor.fit(
         x_train,
-        [max(0.0, float(sample["actual_delay_days"])) for sample in train_samples],
+        [
+            max(0.0, float(sample["actual_delay_days"]))
+            for sample in train_samples
+        ],
     )
 
     ml_probabilities = [
@@ -288,8 +241,12 @@ def train_business_model(
         max(0.0, float(delay))
         for delay in regressor.predict(x_test)
     ]
-    actual_delays = [sample["actual_delay_days"] for sample in test_samples]
-    actual_late = [sample["actual_late"] for sample in test_samples]
+    actual_delays = [
+        sample["actual_delay_days"] for sample in test_samples
+    ]
+    actual_late = [
+        sample["actual_late"] for sample in test_samples
+    ]
 
     baseline_probabilities = []
     baseline_delays = []
@@ -318,42 +275,78 @@ def train_business_model(
     )
     promoted = _better_than_baseline(ml_metrics, baseline_metrics)
 
-    artifact = _serialize_model(
-        business_id,
-        scaler,
-        classifier,
-        regressor,
-        {
+    model_version, trained_at = _new_model_version()
+    artifact = {
+        "business_id": business_id,
+        "model_version": model_version,
+        "model_family_version": MODEL_FAMILY_VERSION,
+        "trained_at": trained_at.isoformat(),
+        "feature_names": FEATURE_NAMES,
+        "scaler_mean": scaler.mean_.tolist(),
+        "scaler_scale": scaler.scale_.tolist(),
+        "classifier_coefficients": classifier.coef_[0].tolist(),
+        "classifier_intercept": float(classifier.intercept_[0]),
+        "regressor_coefficients": regressor.coef_.tolist(),
+        "regressor_intercept": float(regressor.intercept_),
+        "train_count": len(train_samples),
+        "test_count": len(test_samples),
+        "metrics": {
             "candidate": ml_metrics,
             "baseline": baseline_metrics,
             "delta": {
                 "date_mae_days": round(
-                    ml_metrics["date_mae_days"] - baseline_metrics["date_mae_days"],
+                    ml_metrics["date_mae_days"]
+                    - baseline_metrics["date_mae_days"],
                     2,
                 ),
                 "mean_brier_error": round(
-                    ml_metrics["mean_brier_error"] - baseline_metrics["mean_brier_error"],
+                    ml_metrics["mean_brier_error"]
+                    - baseline_metrics["mean_brier_error"],
                     6,
                 ),
             },
         },
-        len(train_samples),
-        len(test_samples),
-        "promoted" if promoted else "candidate_only",
+    }
+
+    candidate = ModelRegistry(
+        business_id=business_id,
+        model_version=model_version,
+        status="candidate",
+        trained_at=trained_at,
+        train_count=len(train_samples),
+        test_count=len(test_samples),
+        metrics=json.dumps(artifact["metrics"]),
+        artifact=json.dumps(artifact),
+        reason=(
+            "Promotion gate passed"
+            if promoted
+            else "Promotion gate not met; baseline retained"
+        ),
     )
+    session.add(candidate)
+    session.flush()
 
-    candidate_path = _artifact_path(business_id, candidate=True)
-    candidate_path.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
-
-    active_path = _artifact_path(business_id)
     if promoted:
-        active_path.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
+        current = session.scalar(
+            select(ModelRegistry)
+            .where(
+                ModelRegistry.business_id == business_id,
+                ModelRegistry.status == "active",
+            )
+            .order_by(ModelRegistry.id.desc())
+        )
+        if current:
+            current.status = "superseded"
+
+        candidate.status = "active"
+
+    session.commit()
 
     return {
         "business_id": business_id,
-        "model_version": ML_MODEL_VERSION,
+        "model_version": model_version,
         "baseline_model_version": BASELINE_MODEL_VERSION,
-        "promotion_status": artifact["promotion_status"],
+        "promotion_status": "promoted" if promoted else "candidate_only",
         "train_count": len(train_samples),
         "test_count": len(test_samples),
         "skipped_cold_start": skipped_cold_start,
@@ -368,57 +361,139 @@ def _sigmoid(value: float) -> float:
     return 1.0 / (1.0 + exp(-value))
 
 
-def _load_active_model(business_id: str) -> dict | None:
-    path = _artifact_path(business_id)
-    if not path.exists():
+def _load_active_model(session: Session, business_id: str) -> dict | None:
+    row = session.scalar(
+        select(ModelRegistry)
+        .where(
+            ModelRegistry.business_id == business_id,
+            ModelRegistry.status == "active",
+        )
+        .order_by(ModelRegistry.id.desc())
+    )
+    if not row:
         return None
+
     try:
-        artifact = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError):
+        return json.loads(row.artifact)
+    except (OSError, TypeError, ValueError):
         return None
-    if artifact.get("promotion_status") != "promoted":
-        return None
-    return artifact
 
 
-def active_model_status(business_id: str) -> dict:
-    active = _load_active_model(business_id)
+def active_model_status(session: Session, business_id: str) -> dict:
+    rows = session.scalars(
+        select(ModelRegistry)
+        .where(ModelRegistry.business_id == business_id)
+        .order_by(ModelRegistry.id.desc())
+        .limit(10)
+    ).all()
+
+    active = next((row for row in rows if row.status == "active"), None)
     if active:
         return {
             "business_id": business_id,
             "active": True,
-            "model_version": active["model_version"],
-            "trained_at": active["trained_at"],
-            "train_count": active["train_count"],
-            "test_count": active["test_count"],
-            "promotion_status": active["promotion_status"],
-            "metrics": active["metrics"],
+            "model_version": active.model_version,
+            "trained_at": active.trained_at,
+            "train_count": active.train_count,
+            "test_count": active.test_count,
+            "promotion_status": "promoted",
+            "metrics": json.loads(active.metrics),
+            "history": [
+                {
+                    "model_version": row.model_version,
+                    "status": row.status,
+                    "trained_at": row.trained_at,
+                    "train_count": row.train_count,
+                    "test_count": row.test_count,
+                    "reason": row.reason,
+                }
+                for row in rows
+            ],
         }
 
-    candidate_path = _artifact_path(business_id, candidate=True)
-    if candidate_path.exists():
-        try:
-            candidate = json.loads(candidate_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, TypeError):
-            candidate = None
-        if candidate:
-            return {
-                "business_id": business_id,
-                "active": False,
-                "model_version": BASELINE_MODEL_VERSION,
-                "candidate_model_version": candidate.get("model_version"),
-                "promotion_status": candidate.get("promotion_status", "candidate_only"),
-                "trained_at": candidate.get("trained_at"),
-                "train_count": candidate.get("train_count"),
-                "test_count": candidate.get("test_count"),
-                "metrics": candidate.get("metrics"),
-            }
+    candidate = next((row for row in rows if row.status == "candidate"), None)
+    if candidate:
+        return {
+            "business_id": business_id,
+            "active": False,
+            "model_version": BASELINE_MODEL_VERSION,
+            "candidate_model_version": candidate.model_version,
+            "promotion_status": "candidate_only",
+            "trained_at": candidate.trained_at,
+            "train_count": candidate.train_count,
+            "test_count": candidate.test_count,
+            "metrics": json.loads(candidate.metrics),
+            "history": [
+                {
+                    "model_version": row.model_version,
+                    "status": row.status,
+                    "trained_at": row.trained_at,
+                    "train_count": row.train_count,
+                    "test_count": row.test_count,
+                    "reason": row.reason,
+                }
+                for row in rows
+            ],
+        }
 
     return {
         "business_id": business_id,
         "active": False,
         "model_version": BASELINE_MODEL_VERSION,
         "promotion_status": "baseline_only",
+        "history": [],
+    }
+
+
+def rollback_active_model(
+    session: Session,
+    business_id: str,
+    target_version: str | None = None,
+) -> dict:
+    active = session.scalar(
+        select(ModelRegistry)
+        .where(
+            ModelRegistry.business_id == business_id,
+            ModelRegistry.status == "active",
+        )
+        .order_by(ModelRegistry.id.desc())
+    )
+    if not active:
+        raise ValueError("no active ML model is available to roll back")
+
+    if target_version:
+        target = session.scalar(
+            select(ModelRegistry)
+            .where(
+                ModelRegistry.business_id == business_id,
+                ModelRegistry.model_version == target_version,
+                ModelRegistry.status == "superseded",
+            )
+        )
+    else:
+        target = session.scalar(
+            select(ModelRegistry)
+            .where(
+                ModelRegistry.business_id == business_id,
+                ModelRegistry.status == "superseded",
+            )
+            .order_by(ModelRegistry.id.desc())
+        )
+
+    if not target:
+        raise ValueError("no prior promoted model is available for rollback")
+
+    active.status = "rolled_back"
+    target.status = "active"
+    active.reason = f"Rolled back in favor of {target.model_version}"
+    target.reason = f"Restored by rollback from {active.model_version}"
+    session.commit()
+
+    return {
+        "business_id": business_id,
+        "rolled_back_from": active.model_version,
+        "active_model_version": target.model_version,
+        "status": "rolled_back",
     }
 
 
@@ -428,40 +503,52 @@ def predict_invoice_risk_with_active_model(
 ) -> dict:
     invoice = session.scalar(
         select(Invoice)
-        .options(selectinload(Invoice.payments), selectinload(Invoice.customer))
+        .options(
+            selectinload(Invoice.payments),
+            selectinload(Invoice.customer),
+        )
         .where(Invoice.id == invoice_id)
     )
     if not invoice:
         raise ValueError("invoice not found")
 
-    # For live inference, use the complete settled buyer history available
-    # at prediction time instead of the historical backtest cutoff.
     from backend.app.repository import buyer_history
 
     history = buyer_history(session, invoice.customer_id)
-    baseline_input = InvoiceInput(
-        due_date=invoice.due_date,
-        amount=float(invoice.amount),
-        buyer=history,
+    baseline = predict_invoice_risk(
+        InvoiceInput(
+            due_date=invoice.due_date,
+            amount=float(invoice.amount),
+            buyer=history,
+        )
     )
-    baseline = predict_invoice_risk(baseline_input)
-    artifact = _load_active_model(
-        session.scalar(select(Invoice.business_id).where(Invoice.id == invoice_id))
-        or ""
-    )
+
+    artifact = _load_active_model(session, invoice.business_id)
     if not artifact:
         return baseline
 
     vector = _feature_vector(history, float(invoice.amount))
     means = artifact["scaler_mean"]
-    scales = [scale if abs(scale) > 1e-12 else 1.0 for scale in artifact["scaler_scale"]]
-    scaled = [(value - mean) / scale for value, mean, scale in zip(vector, means, scales)]
+    scales = [
+        scale if abs(scale) > 1e-12 else 1.0
+        for scale in artifact["scaler_scale"]
+    ]
+    scaled = [
+        (value - mean) / scale
+        for value, mean, scale in zip(vector, means, scales)
+    ]
 
     classifier_score = artifact["classifier_intercept"] + sum(
         coefficient * value
-        for coefficient, value in zip(artifact["classifier_coefficients"], scaled)
+        for coefficient, value in zip(
+            artifact["classifier_coefficients"],
+            scaled,
+        )
     )
-    late_probability = round(_clamp(_sigmoid(classifier_score), 0.01, 0.99), 4)
+    late_probability = round(
+        _clamp(_sigmoid(classifier_score), 0.01, 0.99),
+        4,
+    )
 
     predicted_delay = max(
         0.0,
@@ -480,7 +567,8 @@ def predict_invoice_risk_with_active_model(
 
     reasons = list(baseline["reasons"])
     reasons.append(
-        f"ML model trained on {artifact['train_count']} historical invoices"
+        f"ML model {artifact['model_version']} trained on "
+        f"{artifact['train_count']} historical invoices"
     )
 
     return {
