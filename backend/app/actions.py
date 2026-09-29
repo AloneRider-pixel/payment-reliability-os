@@ -160,7 +160,7 @@ def generate_collection_actions(
                 status="open",
                 due_date=invoice.due_date,
                 days_overdue=plan["days_overdue"],
-                amount=invoice.amount,
+                amount=outstanding_amount,
                 reason=plan["next_step"] + " " + plan["reason"],
                 created_at=now,
                 updated_at=now,
