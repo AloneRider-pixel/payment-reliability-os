@@ -3,6 +3,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from backend.app.actions import generate_collection_actions
@@ -65,7 +66,8 @@ def _claim(
     session.add(run)
     try:
         session.commit()
-    except Exception:
+    except IntegrityError:
+        # A concurrent worker may have claimed the same business/job/day slot.
         session.rollback()
         return None
     return run
