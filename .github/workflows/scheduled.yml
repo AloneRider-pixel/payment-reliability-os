@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       business_id:
-        description: "Optional business ID; blank runs all businesses"
+        description: "Optional business ID for production execution; blank runs all businesses"
         required: false
         default: ""
 
@@ -18,26 +18,43 @@ permissions:
   contents: read
 
 jobs:
-  run-scheduled-operations:
+  scheduled-operations:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
       PYTHONPATH: .
+      PRODUCTION_DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.12"
 
       - name: Install backend dependencies
-        run: pip install -r backend/requirements.txt
+        run: python -m pip install -r backend/requirements.txt
 
-      - name: Run daily operations
+      - name: Verify scheduler integration
+        env:
+          DATABASE_URL: sqlite:///./payment_reliability_ci.db
+        run: python -m pytest tests/test_scheduler.py -q
+
+      - name: Run production scheduled operations
+        if: env.PRODUCTION_DATABASE_URL != ''
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           if [ -n "${{ inputs.business_id }}" ]; then
             python scripts/run_scheduled_jobs.py --business-id "${{ inputs.business_id }}"
           else
             python scripts/run_scheduled_jobs.py
           fi
+
+      - name: Record production configuration status
+        if: env.PRODUCTION_DATABASE_URL == ''
+        run: |
+          {
+            echo "## Production scheduler configuration"
+            echo ""
+            echo "Production scheduled execution was not run because the GitHub Actions secret DATABASE_URL is not configured."
+            echo "The scheduler integration suite passed against an isolated SQLite database."
+          } >> "$GITHUB_STEP_SUMMARY"
