@@ -1,6 +1,7 @@
 name: CI
 
-on:  push:
+on:
+  push:
     branches: [main]
   pull_request:
 
@@ -8,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: payment-reliability-os-ci-{{ github.ref }}
+  group: payment-reliability-os-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
