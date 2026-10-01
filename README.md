@@ -176,3 +176,11 @@ npm run dev
 ## Evidence policy
 
 Never publish model accuracy, customer counts, or cash-recovery figures without reproducible evidence. Evaluation metrics must be calculated from stored predictions matched to actual settled invoice outcomes.
+
+## Repository review path
+
+Start with [evaluation](docs/evaluation.md) and the tests under `tests/` and `backend/tests/`. Review the model lifecycle, drift policy, scheduled operations, and action engine together because they form one operational control loop.
+
+## Maintenance standard
+
+Keep historical feature cutoffs leakage-safe, preserve model promotion/rollback controls, and treat score/grade outputs as operational behavior indicators rather than regulated credit decisions.
