@@ -1,16 +1,16 @@
 # Payment Reliability OS
 
-Payment-behavior intelligence for Indian B2B businesses.
+Payment-behavior intelligence for Indian B2B receivables workflows.
 
 ## Product
 
-Upload invoice and payment history to generate:
+Given invoice and payment history, the system produces:
 
-- Payment Reliability Score (0–100) and A–F behavior grade.
-- Late-payment probability and expected payment delay/date.
+- Payment Reliability Score (0–100) and behavior grade.
+- Late-payment probability and expected delay/date.
 - Cash-at-risk and explainable factor contributions.
 - Confidence/evidence information.
-- Leakage-safe historical backtesting.
+- Leakage-safe historical backtests.
 - Temporal ML candidates with baseline comparison and promotion gates.
 - Persistent model registry, rollback, and drift monitoring.
 - Deterministic receivables actions with human completion.
@@ -24,7 +24,7 @@ Invoices + Payments
         ↓
 Normalization / validation
         ↓
-Leakage-safe historical features
+Leakage-safe features
         ├───────────────┐
         ↓               ↓
 Explainable baseline   Temporal ML candidate
@@ -34,50 +34,40 @@ Explainable baseline   Temporal ML candidate
                 ↓
           Cash at risk
                 ↓
-      Actual payment outcome
+       Observed payment outcome
                 ↓
-         Model evaluation
+           Evaluation
 ```
 
-The action engine is deliberately separated from the ML layer so operational recommendations remain deterministic and reviewable.
-
-## API surface
-
-| Endpoint | Purpose |
-|---|---|
-| `POST /imports/invoices` | Import invoices |
-| `POST /imports/payments` | Import payments |
-| `GET /risk/customers` | Buyer scores/features/exposure |
-| `GET /risk/invoices` | Invoice risk queue |
-| `POST /evaluations/backtest` | Chronological backtest |
-| `GET /evaluations/summary` | Stored prediction metrics |
-| `POST /models/train` | Train/evaluate ML candidate |
-| `GET /models/status` | Active model status |
-| `GET /models/drift` | Drift summary |
-| `POST /models/retrain-if-needed` | Policy-driven retraining |
-| `POST /models/rollback` | Restore previous model |
-| `POST /actions/generate` | Generate receivables actions |
-| `GET /actions` | Action queue |
-| `GET /jobs/runs` | Scheduled-operation audit history |
+The action layer is separated from the model layer so operational recommendations remain deterministic and reviewable.
 
 ## Model lifecycle
 
-Training is chronological: future payment outcomes are excluded from historical feature construction. Candidates are compared with the explainable baseline and promoted only when the configured evaluation gate is satisfied.
+Historical features are constructed without future outcomes. Candidates are evaluated against the explainable baseline and promoted only when the configured gate is satisfied. Model lineage, metrics, rollback state, and registry metadata are persisted in the database.
 
-Promoted model metadata, lineage, metrics, and rollback state are persisted in the database rather than depending on local files.
-
-Drift monitoring reconstructs a recent eligible cohort against the active model's training feature distribution. The configured thresholds are operational prototype policies, not statistical significance tests.
+Drift checks compare eligible recent cohorts against the active model's training feature distribution. Thresholds are operational prototype policies, not statistical significance tests.
 
 ## Scheduled operations
 
-`scripts/run_scheduled_jobs.py` executes, in order:
+```text
+reconcile outcomes
+   → check drift / candidate promotion
+   → refresh invoice predictions
+   → refresh action queue
+```
 
-1. Reconcile pending predictions with new payment outcomes.
-2. Check drift and train/promote a candidate when policy requires it.
-3. Refresh outstanding invoice predictions.
-4. Refresh the receivables action queue.
+Repeated business/date/job combinations use an idempotent database slot.
 
-Repeated business/date/job combinations are protected by an idempotent database slot.
+## Stack
+
+| Layer | Technology |
+|---|---|
+| Backend | Python, FastAPI |
+| Persistence | PostgreSQL |
+| ML | scikit-learn / temporal evaluation |
+| Frontend | React, TypeScript, Vite |
+| Operations | Scheduled jobs, rollback/drift controls |
+| Delivery | GitHub Actions |
 
 ## Quick start
 
@@ -105,25 +95,27 @@ cd frontend
 npm run build
 ```
 
-CI runs backend tests and the frontend production build; CodeQL, dependency review, Scorecard, and scheduled operations are separate repository workflows.
+CI covers backend tests and the frontend build; CodeQL, dependency review, Scorecard, and scheduled operations are separate workflows.
 
 ## Security and trust boundaries
 
-Treat invoice/payment records, ML artifacts, model outputs, and operational actions as separate trust boundaries. Never convert a model score into an automated commercial decision without an explicit application policy and human-review path.
+Invoice/payment data, model artifacts, predictions, and operational actions have different trust boundaries. Do not turn model output into an automated commercial decision without an explicit policy and human-review path.
 
 ## Evidence policy
 
-Never publish model accuracy, customer counts, recovery figures, or cash-at-risk claims without reproducible evidence. Evaluation results must identify the historical dataset, leakage controls, metrics, environment, and producing commit.
+Never publish accuracy, customer counts, recovery, or cash-at-risk claims without reproducible evidence including dataset, leakage controls, metrics, environment, and producing commit.
 
 See [docs/evaluation.md](docs/evaluation.md).
 
-## Review path
+## Documentation
 
-Start with evaluation and tests, then review feature cutoffs, promotion/rollback logic, drift thresholds, scheduler idempotency, and action authorization together.
+- [Evaluation](docs/evaluation.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
 
 ## Maintenance standard
 
-Keep historical features leakage-safe, preserve baseline gates and rollback controls, and keep financial/payment semantics separate from model output.
+Keep historical features leakage-safe, baseline gates and rollback controls intact, and financial semantics separate from model output.
 
 ## License
 
