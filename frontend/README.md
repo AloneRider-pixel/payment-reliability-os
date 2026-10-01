@@ -2,26 +2,36 @@
 
 React + TypeScript operator dashboard for the Payment Reliability OS API.
 
-## Run
+## Scope
 
-From repository root:
+The UI presents server-computed payment-behavior scores, cash-at-risk, invoice queues, evidence/confidence information, and evaluation results.
 
-    cd frontend
-    npm install
-    npm run dev
+The browser is not the authority for scoring. Keep scoring/model logic on the backend so the displayed result cannot diverge from persisted evaluation and policy state.
 
-The dashboard expects FastAPI at `http://127.0.0.1:8000`.
+## Development
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Default API: `http://127.0.0.1:8000`
 
 Override with `VITE_API_BASE` when needed.
 
-## Product views
+## Verification
 
-- Receivables and cash-at-risk
-- High-risk invoice queue
-- Buyer Payment Reliability scores
-- Evidence/confidence display
-- Prediction validation metrics
+```bash
+npm run build
+```
+
+Run backend tests from repository root as part of end-to-end contract changes.
+
+## Security
+
+Do not expose payment credentials, database URLs, or model artifacts to the browser. Validate API error states and preserve the semantics of evidence/confidence fields.
 
 ## Review path
 
-Keep this UI as a thin authenticated client of the FastAPI service. Validate API error handling, evidence/confidence display, and score semantics when backend contracts change; never add independent client-side scoring logic that can diverge from the server.
+Review `src/api.ts`, score presentation, cash-at-risk views, and API error handling when server contracts change.
