@@ -21,3 +21,7 @@ Override with `VITE_API_BASE` when needed.
 - Buyer Payment Reliability scores
 - Evidence/confidence display
 - Prediction validation metrics
+
+## Review path
+
+Keep this UI as a thin authenticated client of the FastAPI service. Validate API error handling, evidence/confidence display, and score semantics when backend contracts change; never add independent client-side scoring logic that can diverge from the server.
