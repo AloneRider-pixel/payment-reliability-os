@@ -2,9 +2,11 @@
 
 React + TypeScript operator dashboard for Payment Reliability OS.
 
-## Responsibilities
+## Scope
 
-The frontend presents server-computed payment-behavior scores, invoice queues, cash-at-risk, evidence/confidence data, and evaluation results. It is not the authority for scoring, model promotion, or policy decisions.
+The frontend presents server-computed payment-behavior scores, invoice queues, cash-at-risk, evidence/confidence data, and evaluation results.
+
+It is **not** the authority for scoring, model promotion, rollback, or commercial policy decisions.
 
 ## Development
 
@@ -22,15 +24,15 @@ Override `VITE_API_BASE` when the API is not at the local default.
 npm run build
 ```
 
-Run backend tests from the repository root when changing shared contracts.
+Run backend tests from the repository root when changing shared API or financial semantics.
 
 ## Security
 
-Never expose payment credentials, database URLs, or model artifacts to the browser. Preserve the semantics of evidence/confidence fields and treat API errors as distinct from empty data.
+Never expose payment credentials, database URLs, provider secrets, or model artifacts to the browser. Preserve the semantics of evidence/confidence fields and treat API errors as distinct from empty data.
 
 ## Review path
 
-Review `src/api.ts`, score presentation, cash-at-risk views, and API error handling for server-contract changes.
+For server-contract changes, review `src/api.ts`, score presentation, cash-at-risk views, and loading/error handling together.
 
 ## License
 
