@@ -4,7 +4,7 @@ Payment-behavior intelligence for Indian B2B receivables workflows.
 
 ## Product
 
-Given invoice and payment history, the system produces:
+Given invoice and payment history, the system can produce:
 
 - Payment Reliability Score (0–100) and behavior grade.
 - Late-payment probability and expected delay/date.
@@ -39,13 +39,13 @@ Explainable baseline   Temporal ML candidate
            Evaluation
 ```
 
-The action layer is separated from the model layer so operational recommendations remain deterministic and reviewable.
+The action layer is deliberately separated from the model layer so recommendations remain deterministic and reviewable.
 
 ## Model lifecycle
 
-Historical features are constructed without future outcomes. Candidates are evaluated against the explainable baseline and promoted only when the configured gate is satisfied. Model lineage, metrics, rollback state, and registry metadata are persisted in the database.
+Historical features are constructed without future outcomes. Candidates are evaluated against an explainable baseline and promoted only when the configured gate is satisfied. Model lineage, metrics, rollback state, and registry metadata are persisted.
 
-Drift checks compare eligible recent cohorts against the active model's training feature distribution. Thresholds are operational prototype policies, not statistical significance tests.
+Drift checks compare eligible recent cohorts against the active model's training feature distribution. Thresholds are operational prototype policies, not statistical-significance tests.
 
 ## Scheduled operations
 
@@ -71,6 +71,8 @@ Repeated business/date/job combinations use an idempotent database slot.
 
 ## Quick start
 
+Backend:
+
 ```bash
 cp .env.example .env
 python -m venv .venv
@@ -95,7 +97,7 @@ cd frontend
 npm run build
 ```
 
-CI covers backend tests and the frontend build; CodeQL, dependency review, Scorecard, and scheduled operations are separate workflows.
+CI covers backend tests and the frontend build; CodeQL, dependency review, Scorecard, and scheduled operations are separate validation surfaces.
 
 ## Security and trust boundaries
 
@@ -103,7 +105,7 @@ Invoice/payment data, model artifacts, predictions, and operational actions have
 
 ## Evidence policy
 
-Never publish accuracy, customer counts, recovery, or cash-at-risk claims without reproducible evidence including dataset, leakage controls, metrics, environment, and producing commit.
+Never publish accuracy, customer counts, recovery, or cash-at-risk claims without reproducible evidence covering dataset, leakage controls, metrics, environment, denominator, and producing commit.
 
 See [docs/evaluation.md](docs/evaluation.md).
 
@@ -113,9 +115,9 @@ See [docs/evaluation.md](docs/evaluation.md).
 - [Contributing](CONTRIBUTING.md)
 - [Security](SECURITY.md)
 
-## Maintenance standard
+## Contribution standard
 
-Keep historical features leakage-safe, baseline gates and rollback controls intact, and financial semantics separate from model output.
+Preserve leakage-safe feature construction, baseline gates, rollback controls, idempotent scheduled work, and the separation between model output and commercial policy.
 
 ## License
 
